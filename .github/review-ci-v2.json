@@ -1,0 +1,17 @@
+{
+  "base": "5caaf73e3b065856f38e9cb58571e68edfbd2a59",
+  "head": "d8c37cc6c1d3d55ed0e9ea003e676e707ee8f3ea",
+  "platforms": [],
+  "policy": "review-ci-v2.2-no-sonar",
+  "pr": 997,
+  "repository": "storytold/cadcraft",
+  "source_tree": "9c8ec9b0da90365fa832a0ccbb462de9864ae253",
+  "workflows": {
+    ".github/workflows/ast-grep.yml": "2a5899a68dda6d2c77bcc218779c8019eb369128c710f940825c1bedbf989890",
+    ".github/workflows/ci.yml": "f23078db3a7d68fd5750aa98e0ef038dc9825040d867bd44c6c0449535d2b0d9",
+    ".github/workflows/freebsd.yml": "cd6dbc7b96b83ada71586f073e7211b613ed40501e4a66bb3f24e8f54cbc583d",
+    ".github/workflows/nix.yml": "a7d92d49f777bac682bdc6745c6118eae7eabc00a28121e5e71be9e36333e0cb",
+    ".github/workflows/packaging-lint.yml": "4556f0193e67b307239b70df3b060b76066478e429044414fac3c263192a3833",
+    ".github/workflows/windows-arm64.yml": "36797f6ea1dcf593d698b0f7df87205e1bd7ba8f953889e0b1ee97f72de036ac"
+  }
+}
