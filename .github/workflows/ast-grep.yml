@@ -1,0 +1,20 @@
+name: ast-grep
+'on':
+  pull_request:
+    types:
+    - opened
+    - synchronize
+    - reopened
+    - labeled
+  workflow_dispatch: null
+permissions:
+  contents: read
+concurrency:
+  group: ast-grep-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  scan:
+    uses: storytold/craft-common-actions/.github/workflows/ast-grep.yml@2b3fb9dc05036f73c77d18f753a3aa9da55fa386
+    with:
+      config: lint/ast-grep/sgconfig.yml
+      paths: apps/cadcraft-cli/src apps/cadcraft/src/launch_args.rs apps/cadcraft/src/main.rs
