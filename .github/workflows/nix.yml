@@ -1,33 +1,26 @@
-# Evaluates the Nix flake (no build, about a minute): `nix build` / `nix develop` stop at evaluation
-# when Cargo.lock gains something nix/package.nix can't vendor, and nothing else would notice.
 name: Nix
-
-on:
-  push:
-    branches: [main]
-    paths: ["flake.nix", "flake.lock", "nix/**", "Cargo.lock", ".github/workflows/nix.yml"]
+'on':
   pull_request:
-    paths: ["flake.nix", "flake.lock", "nix/**", "Cargo.lock", ".github/workflows/nix.yml"]
-  workflow_dispatch:
-
+    types:
+    - opened
+    - synchronize
+    - reopened
+    - labeled
+  workflow_dispatch: null
 permissions:
   contents: read
-
 concurrency:
   group: nix-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
-  eval:
+  nix:
+    uses: storytold/craft-common-actions/.github/workflows/nix.yml@2b3fb9dc05036f73c77d18f753a3aa9da55fa386
+  git-sources:
+    name: Git dependencies come from storytold
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
-      - name: nix flake check --no-build
-        run: |
-          if [ -f flake.nix ]; then
-            nix flake check --no-build --all-systems
-          else
-            echo "No flake.nix present in this repository; skipping check."
-          fi
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+    - name: Git dependencies come from storytold
+      run: "set -euo pipefail\ntest -f Cargo.lock || { echo \"Cargo.lock is missing\"; exit 1; }\n# Source replacement, patches and path overrides in cargo config never show up\n# in Cargo.lock. Parsed rather than grepped: TOML has many spellings of one key.\n# Cargo still reads the legacy .cargo/config.\npython3 - <<'PY'\nimport os, sys, tomllib\nfor path in (\".cargo/config\", \".cargo/config.toml\"):\n    if not os.path.exists(path):\n        continue\n    config = tomllib.load(open(path, \"rb\"))\n    replaced = [name for name, source in config.get(\"source\", {}).items()\n                if isinstance(source, dict) and \"replace-with\" in source]\n    if replaced or \"patch\" in config or \"paths\" in config:\n        print(f\"{path} replaces, patches or overrides a source\")\n        sys.exit(1)\nPY\n# Fails when Cargo.lock is out of date with the manifests.\ncargo metadata --locked --format-version 1 > /dev/null\npython3 - <<'PY'\nimport sys, tomllib\nlock = tomllib.load(open(\"Cargo.lock\"\
+        , \"rb\"))\nbad = sorted({p[\"source\"] for p in lock.get(\"package\", [])\n              if p.get(\"source\", \"\").startswith(\"git+\")\n              and not p[\"source\"].startswith(\"git+https://github.com/storytold/\")})\nif bad:\n    print(\"Git dependencies outside github.com/storytold:\", *bad, sep=\"\\n\")\n    sys.exit(1)\nPY\n"
