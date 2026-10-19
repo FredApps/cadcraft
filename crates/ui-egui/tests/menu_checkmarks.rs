@@ -4,10 +4,12 @@
 use cadcraft_engine::Session;
 use cadcraft_ui_egui::{CadApp, Services, menus};
 
+/// A fresh app with an empty session.
 fn app() -> CadApp {
     CadApp::new(Session::new(), Services::default())
 }
 
+/// Collects the command id of every item in `entries`, submenus included.
 fn ids(entries: &[menus::Entry], out: &mut Vec<String>) {
     for e in entries {
         match e {
@@ -17,6 +19,7 @@ fn ids(entries: &[menus::Entry], out: &mut Vec<String>) {
     }
 }
 
+/// Choosing one item of a group leaves exactly that item checked.
 #[test]
 fn exactly_the_chosen_item_of_a_group_is_checked() {
     let mut a = app();
@@ -36,6 +39,7 @@ fn exactly_the_chosen_item_of_a_group_is_checked() {
     }
 }
 
+/// A switch is checked while it is on, and flips with each click.
 #[test]
 fn a_switch_is_checked_while_it_is_on_and_follows_the_menu() {
     let mut a = app();
@@ -56,6 +60,7 @@ fn a_switch_is_checked_while_it_is_on_and_follows_the_menu() {
     }
 }
 
+/// Commands that are neither a switch nor a choice report no state.
 #[test]
 fn ordinary_commands_have_no_check_mark() {
     let a = app();
@@ -64,6 +69,7 @@ fn ordinary_commands_have_no_check_mark() {
     }
 }
 
+/// Every switch and choice in the menu tree has a state to show.
 #[test]
 fn every_switch_and_choice_in_the_menu_tree_reports_a_state() {
     let a = app();

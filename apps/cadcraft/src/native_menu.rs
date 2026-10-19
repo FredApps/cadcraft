@@ -16,6 +16,7 @@ enum Item {
 }
 
 impl Item {
+    /// Sets the label of the row.
     fn set_text(&self, text: &str) {
         match self {
             Self::Plain(i) => i.set_text(text),
@@ -23,6 +24,7 @@ impl Item {
         }
     }
 
+    /// Enables or greys out the row.
     fn set_enabled(&self, enabled: bool) {
         match self {
             Self::Plain(i) => i.set_enabled(enabled),
@@ -30,6 +32,7 @@ impl Item {
         }
     }
 
+    /// The row as the type `Submenu::append` takes.
     fn as_menu_item(&self) -> &dyn IsMenuItem {
         match self {
             Self::Plain(i) => i,
@@ -59,6 +62,7 @@ fn accel(sc: &str) -> Option<Accelerator> {
 }
 
 impl NativeMenu {
+    /// Builds the system menu bar from the menu tree and installs it for the app.
     pub fn install(app: &mut CadApp) -> Self {
         let menu = Menu::new();
         let mut items = HashMap::new();
@@ -118,6 +122,7 @@ impl NativeMenu {
         });
     }
 
+    /// Runs the commands chosen in the menu, then keeps enablement and check marks current.
     pub fn poll(&mut self, app: &mut CadApp, ctx: &egui::Context) {
         while let Ok(ev) = MenuEvent::receiver().try_recv() {
             if let Some((cmd, _, _)) = self.items.get(ev.id.as_ref()) {
@@ -162,6 +167,7 @@ impl NativeMenu {
     }
 }
 
+/// Appends `entries` to `parent`; rows for which `checked` reports a state become check items.
 fn build(
     parent: &Submenu,
     entries: &[Entry],
