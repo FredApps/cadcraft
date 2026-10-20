@@ -474,7 +474,7 @@ fn style_manager(ctx: &egui::Context, open: &mut bool, title: &str, cmd: &'stati
     let err_key = format!("{cmd}_err");
     let mut sel = temp::<String>(ctx, &sel_key).filter(|s| styles.iter().any(|x| x.name == *s)).unwrap_or_else(|| current.to_string());
     let mut new_name = temp::<String>(ctx, &new_key).unwrap_or_default();
-    let mut err_msg = temp::<String>(ctx, &err_key);
+    let mut err_msg = temp::<Option<String>>(ctx, &err_key).flatten().or_else(|| temp::<String>(ctx, &err_key));
     let mut action = None;
     egui::Window::new(title).open(open).default_size(vec2(540.0, 320.0)).resizable(true).show(ctx, |ui| {
         ui.label(RichText::new(format!("Current style: {current}")).color(t.text_dim));

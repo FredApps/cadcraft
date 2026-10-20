@@ -126,4 +126,11 @@ fn dimstyle_dialog_action_updates_style_properties() {
     let mut out = ctx.run_ui(Default::default(), |ui| dialogs::show(&mut app, ui.ctx()));
     out.textures_delta.clear();
     assert_eq!(app.ui.dialog.as_deref(), Some("dimstyle"));
+
+    // Verify error message stored as Option<String> persists into subsequent frames.
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("dimstyle_err"), Some("Text height must be greater than 0".to_string())));
+    let mut out = ctx.run_ui(Default::default(), |ui| dialogs::show(&mut app, ui.ctx()));
+    out.textures_delta.clear();
+    let err_after: Option<Option<String>> = ctx.data_mut(|d| d.get_temp(egui::Id::new("dimstyle_err")));
+    assert_eq!(err_after, Some(Some("Text height must be greater than 0".to_string())));
 }
