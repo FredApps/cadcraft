@@ -1300,9 +1300,10 @@ mod tests {
     #[test]
     fn arc_perpendicular_clamps_to_the_arc() {
         let d = arc_drawing();
-        // The foot of the perpendicular from below lands at 270°, in the gap; the nearest point
-        // of the arc is one of its ends.
-        let h = osnap(&d, &Space::Model, Vec2::new(20.0, -3.0), 5.0, mode::PER, Some(Vec2::new(20.0, -6.0)), false).expect("the perpendicular on the arc");
+        // The foot of the perpendicular from below lands at 270°, in the gap. The opposite
+        // antipode at (20,2) is on the arc. The cursor is 5 units away from it, so the aperture
+        // is a little larger to keep the distance test off the boundary.
+        let h = osnap(&d, &Space::Model, Vec2::new(20.0, -3.0), 5.5, mode::PER, Some(Vec2::new(20.0, -6.0)), false).expect("the perpendicular on the arc");
         assert!(on_arc(h.point), "perpendicular must stay on the arc, got {:?}", h.point);
         assert!(h.point.near(Vec2::new(20.0, 2.0), 1e-9), "the opposite antipode on the arc, got {:?}", h.point);
     }
