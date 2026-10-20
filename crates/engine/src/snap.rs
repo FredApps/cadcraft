@@ -478,7 +478,12 @@ fn finish(
             if osmode & mode::PER != 0 {
                 match p {
                     Prim::Seg(Segment::Line(l)) => cands.push((mode::PER, l.project(bp))),
-                    Prim::Seg(Segment::Arc { arc, .. }) => cands.push((mode::PER, arc.closest(bp))),
+                    // Both antipodes, filtered to the arc's sweep: a perpendicular in the gap is
+                    // not offered, and the far side is still found.
+                    Prim::Seg(Segment::Arc { arc, .. }) => {
+                        let curve = SnapCurve::Arc { center: arc.center, radius: arc.radius, start: arc.start, end: arc.end };
+                        cands.extend(curve.perpendiculars(bp, bp).into_iter().map(|q| (mode::PER, q)));
+                    }
                     Prim::Circle(c) => cands.push((mode::PER, c.closest(bp))),
                     Prim::Infinite { base: b0, dir, .. } => cands.push((mode::PER, *b0 + *dir * (bp - *b0).dot(*dir))),
                     Prim::Ellipse(e) => cands.extend(curves::ellipse_perpendiculars(e, bp).into_iter().map(|q| (mode::PER, q))),
@@ -934,7 +939,12 @@ pub fn resolve_deferred(a: LineEnd, b: LineEnd) -> Option<(Vec2, Vec2)> {
 /// caller retries swapped).
 fn deferred_pairs(d1: &Deferred, d2: &Deferred) -> Option<Vec<(Vec2, Vec2)>> {
     use SnapCurve::{Circle as C, Line as L};
-    let pairs = match ((d1.mode, d1.curve), (d2.mode, d2.curve)) {
+    // The math below is on the circle an arc lies on; the sweep is checked afterwards.
+    let circle_of = |c: SnapCurve| match c {
+        SnapCurve::Circle { center, radius } | SnapCurve::Arc { center, radius, .. } => C { center, radius },
+        other => other,
+    };
+    let pairs = match ((d1.mode, circle_of(d1.curve)), (d2.mode, circle_of(d2.curve))) {
         ((mode::TAN, C { center: c1, radius: r1 }), (mode::TAN, C { center: c2, radius: r2 })) => {
             Circle::new(c1, r1).common_tangents(&Circle::new(c2, r2))
         }
@@ -1292,9 +1302,9 @@ mod tests {
         let d = arc_drawing();
         // The foot of the perpendicular from below lands at 270°, in the gap; the nearest point
         // of the arc is one of its ends.
-        let h = osnap(&d, &Space::Model, Vec2::new(20.0, -3.0), 5.0, mode::PER, Some(Vec2::new(20.0, -6.0)), false).expect("the arc's end");
+        let h = osnap(&d, &Space::Model, Vec2::new(20.0, -3.0), 5.0, mode::PER, Some(Vec2::new(20.0, -6.0)), false).expect("the perpendicular on the arc");
         assert!(on_arc(h.point), "perpendicular must stay on the arc, got {:?}", h.point);
-        assert!(h.point.near(Vec2::new(22.0, 0.0), 1e-9), "nearest point is the 0° end, got {:?}", h.point);
+        assert!(h.point.near(Vec2::new(20.0, 2.0), 1e-9), "the opposite antipode on the arc, got {:?}", h.point);
     }
 
     #[test]
@@ -1310,5 +1320,25 @@ mod tests {
         let solved = resolve_deferred(LineEnd::Deferred(df), pt(10.0, 10.0)).expect("a tangent from (10,10)");
         // "In the order given": the deferred end solves first.
         assert!(on_arc(solved.0), "resolved tangent must lie on the arc, got {:?}", solved.0);
+    }
+
+    #[test]
+    fn deferred_tangent_pairs_with_arcs() {
+        // The arc is the top half of a circle at (0,0) r=5.
+        let arc = SnapCurve::Arc { center: Vec2::new(0.0, 0.0), radius: 5.0, start: 0.0, end: std::f64::consts::PI };
+        // The circle is at (10,0) r=5.
+        let circle = SnapCurve::Circle { center: Vec2::new(10.0, 0.0), radius: 5.0 };
+
+        let d_arc = Deferred { mode: mode::TAN, curve: arc, at: Vec2::new(0.0, 5.0) };
+        let d_circle = Deferred { mode: mode::TAN, curve: circle, at: Vec2::new(10.0, 5.0) };
+
+        // Common tangents of the carrier circles: two outer (y=5 and y=-5) and two inner.
+        // The y=-5 tangent touches the arc's circle at (0,-5), which is in the gap.
+        // The y=5 tangent touches at (0,5), on the arc.
+        // The inner tangents touch the left circle at angles that are also not on the top half.
+        // Only the y=5 solution survives the arc's sweep.
+        let solved = resolve_deferred(LineEnd::Deferred(d_arc), LineEnd::Deferred(d_circle)).unwrap();
+        assert!(solved.0.near(Vec2::new(0.0, 5.0), 1e-9), "expected the belt tangent on the top arc, got {:?}", solved.0);
+        assert!(solved.1.near(Vec2::new(10.0, 5.0), 1e-9));
     }
 }
