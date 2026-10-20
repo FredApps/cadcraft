@@ -89,12 +89,16 @@ fn dimstyle_refuses_invalid_values_with_diagnostic() {
     assert_eq!(st.text_height, 2.5);
     assert_eq!(st.decimals, 4);
 
-    // Text height 0 and precision 200 must be refused.
+    // Text height 0, precision 200, and negative precision -1 must be refused.
     let r = app.run("dimstyle", json!({ "name": "Standard", "textHeight": 0.0, "decimals": 200, "current": false })).unwrap();
     let ignored = r["ignored"].as_array().expect("ignored list");
     assert!(ignored.iter().any(|v| v == "textHeight"));
     assert!(ignored.iter().any(|v| v == "decimals"));
     assert!(r["message"].as_str().unwrap().contains("Ignored invalid value"));
+
+    let r = app.run("dimstyle", json!({ "name": "Standard", "decimals": -1, "current": false })).unwrap();
+    let ignored = r["ignored"].as_array().expect("ignored list");
+    assert!(ignored.iter().any(|v| v == "decimals"));
 
     // Style retains valid values.
     let d = app.session.doc().unwrap();
