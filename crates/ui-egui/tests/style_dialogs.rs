@@ -118,7 +118,7 @@ fn dimstyle_dialog_action_updates_style_properties() {
     assert_eq!(st.ext_extend, 1.75);
 
     // Rendering frame with error present in context data displays warning without panicking.
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new("dimstyle_err"), Some("Text height must be greater than 0".to_string())));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("dimstyle_err"), "Text height must be greater than 0".to_string()));
     let mut out = ctx.run_ui(Default::default(), |ui| dialogs::show(&mut app, ui.ctx()));
     out.textures_delta.clear();
     assert_eq!(app.ui.dialog.as_deref(), Some("dimstyle"));

@@ -82,9 +82,13 @@ fn fmt_num(v: f64) -> String {
     if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s }
 }
 
+fn parse_num_field(ui: &mut egui::Ui, id: impl egui::AsId, v: f64) -> Option<Result<f64, ()>> {
+    expr_field(ui, egui::Id::new(id), &fmt_num(v)).map(|t| t.parse::<f64>().ok().filter(|v| v.is_finite()).ok_or(()))
+}
+
 /// A number field that commits on Enter or focus loss.
 fn num_field(ui: &mut egui::Ui, id: impl egui::AsId, v: f64) -> Option<f64> {
-    expr_field(ui, egui::Id::new(id), &fmt_num(v)).and_then(|t| t.parse::<f64>().ok()).filter(|v| v.is_finite())
+    parse_num_field(ui, id, v).and_then(Result::ok)
 }
 
 fn temp<T: Clone + Send + Sync + 'static>(ctx: &egui::Context, id: &str) -> Option<T> {
@@ -318,8 +322,10 @@ impl NumRule {
         match self {
             NumRule::NonNegative if v < 0.0 => Err("must be 0 or greater"),
             NumRule::Positive if v <= 0.0 => Err("must be greater than 0"),
-            NumRule::Decimals if !(0.0..=8.0).contains(&v) => Err("precision must be between 0 and 8"),
-            NumRule::Decimals => Ok(v.round().clamp(0.0, 8.0)),
+            NumRule::Decimals => {
+                let r = v.round();
+                if (0.0..=8.0).contains(&r) { Ok(r) } else { Err("precision must be between 0 and 8") }
+            }
             _ => Ok(v),
         }
     }
@@ -511,14 +517,20 @@ fn style_manager(ctx: &egui::Context, open: &mut bool, title: &str, cmd: &'stati
                         let change = match f {
                             Field::Num(key, label, v, rule) => {
                                 ui.label(*label);
-                                if let Some(raw) = num_field(ui, (cmd, &style.name, *key), *v) {
-                                    match rule.validate(raw) {
-                                        Ok(valid) => {
-                                            err_msg = None;
-                                            Some((*key, json!(valid)))
-                                        }
-                                        Err(why) => {
-                                            err_msg = Some(format!("{label}: {why}"));
+                                if let Some(parsed) = parse_num_field(ui, (cmd, &style.name, *key), *v) {
+                                    match parsed {
+                                        Ok(raw) => match rule.validate(raw) {
+                                            Ok(valid) => {
+                                                err_msg = None;
+                                                Some((*key, json!(valid)))
+                                            }
+                                            Err(why) => {
+                                                err_msg = Some(format!("{label}: {why}"));
+                                                None
+                                            }
+                                        },
+                                        Err(()) => {
+                                            err_msg = Some(format!("{label}: Enter a valid number"));
                                             None
                                         }
                                     }
