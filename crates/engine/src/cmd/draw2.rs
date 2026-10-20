@@ -892,6 +892,10 @@ fn default_arc_len(s: &Session) -> f64 {
     d.map(|d| d.header.f64("REVCLOUDARCLEN", if metric { 15.0 } else { 0.5 })).unwrap_or(0.5).max(1e-6)
 }
 
+/// The bulge of every arc of a revision cloud (an arc of about 110°). Readers take a closed
+/// polyline for a cloud only with `RevcloudProps` xdata and every bulge within 0.02 of this.
+const CLOUD_BULGE: f64 = 0.520567050552;
+
 /// Bulged closed polyline vertices for a revision cloud around `boundary`.
 pub(crate) fn cloud_vertices(boundary: &[Vec2], arc_len: f64, per_edge: bool, reverse: bool) -> Option<Vec<PolyVertex>> {
     let mut pts: Vec<Vec2> = Vec::new();
@@ -934,7 +938,7 @@ pub(crate) fn cloud_vertices(boundary: &[Vec2], arc_len: f64, per_edge: bool, re
             out.extend(chain.at_length(perim * j as f64 / k as f64).map(|x| x.0));
         }
     }
-    let b = if reverse { -0.5 } else { 0.5 };
+    let b = if reverse { -CLOUD_BULGE } else { CLOUD_BULGE };
     Some(out.into_iter().map(|p| PolyVertex::with_bulge(p, b)).collect())
 }
 
