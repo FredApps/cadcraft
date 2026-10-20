@@ -323,6 +323,9 @@ impl NumRule {
             NumRule::NonNegative if v < 0.0 => Err("must be 0 or greater"),
             NumRule::Positive if v <= 0.0 => Err("must be greater than 0"),
             NumRule::Decimals => {
+                if v < 0.0 {
+                    return Err("precision must be between 0 and 8");
+                }
                 let r = v.round();
                 if (0.0..=8.0).contains(&r) { Ok(r) } else { Err("precision must be between 0 and 8") }
             }
@@ -1367,5 +1370,23 @@ mod plot_dialog_tests {
         plot_window_resume(&mut app, &ctx);
         assert_eq!(app.ui.dialog.as_deref(), Some("plot"));
         assert_eq!(temp::<PlotState>(&ctx, "plot_state").unwrap().window, [2.0, 3.0, 12.0, 9.0]);
+    }
+
+    #[test]
+    fn num_rule_validates_ranges_and_precision() {
+        assert_eq!(NumRule::NonNegative.validate(0.0), Ok(0.0));
+        assert_eq!(NumRule::NonNegative.validate(1.5), Ok(1.5));
+        assert!(NumRule::NonNegative.validate(-0.01).is_err());
+
+        assert_eq!(NumRule::Positive.validate(0.1), Ok(0.1));
+        assert!(NumRule::Positive.validate(0.0).is_err());
+        assert!(NumRule::Positive.validate(-1.0).is_err());
+
+        assert_eq!(NumRule::Decimals.validate(0.0), Ok(0.0));
+        assert_eq!(NumRule::Decimals.validate(4.4), Ok(4.0));
+        assert_eq!(NumRule::Decimals.validate(8.0), Ok(8.0));
+        assert!(NumRule::Decimals.validate(-0.1).is_err());
+        assert!(NumRule::Decimals.validate(-1.0).is_err());
+        assert!(NumRule::Decimals.validate(8.5).is_err());
     }
 }
