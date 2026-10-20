@@ -1274,3 +1274,34 @@
 	Save changes to {name}?	是否保存对 {name} 的更改？
 	Your changes will be lost if you don't save them.	如果不保存，您的更改将丢失。
 	Don't Save	不保存
+	Hatch and Gradient	填充和渐变
+	Boundaries	边界
+	Add: Pick points	添加：拾取点
+	Add: Select objects	添加：选择对象
+	Boundaries picked: {n}	已拾取边界：{n}
+	Associate	关联
+	Create separate hatches	创建独立的填充
+	Island detection	孤岛检测
+	Normal	普通
+	Outer	外部
+	Ignore	忽略
+	Hatch origin	填充原点
+	Use current origin	使用当前原点
+	Specified origin	指定原点
+	Click to set new origin	点击设置新原点
+	Default to boundary extents	默认至边界范围
+	Bottom left	左下
+	Bottom right	右下
+	Top right	右上
+	Top left	左上
+	Center	中心
+	Color 1	颜色 1
+	Color 2	颜色 2
+	Shape	形状
+	Linear	线性
+	Inverted	反向
+	Centered	居中
+	Cylinder	圆柱体
+	Curved	曲线
+	Spherical	球面
+	Hemispherical	半球面
