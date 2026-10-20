@@ -63,7 +63,14 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, name: &str, open: &mut bool
     };
     if let Some((cmd, p)) = action {
         // Errors are echoed on the command line by `run`.
-        let _ = app.run(cmd, p);
+        let r = app.run(cmd, p);
+        if let Ok(v) = r
+            && let Some(ignored) = v.get("ignored").and_then(Value::as_array)
+            && !ignored.is_empty()
+        {
+            let names: Vec<_> = ignored.iter().filter_map(Value::as_str).collect();
+            set_temp(ctx, &format!("{cmd}_err"), Some(format!("Ignored invalid value for: {}", names.join(", "))));
+        }
     }
 }
 
@@ -295,9 +302,32 @@ fn point_style(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action
 
 // ---------- Text Style, Table Style and Multileader Style ----------
 
+/// Numerical validation rule for style properties.
+#[derive(Clone, Copy)]
+enum NumRule {
+    /// Values must be 0 or greater (default for dimensions and sizes).
+    NonNegative,
+    /// Values must be strictly greater than 0 (e.g. text height).
+    Positive,
+    /// Dimension precision (DIMDEC): integer 0 to 8.
+    Decimals,
+}
+
+impl NumRule {
+    fn validate(self, v: f64) -> Result<f64, &'static str> {
+        match self {
+            NumRule::NonNegative if v < 0.0 => Err("must be 0 or greater"),
+            NumRule::Positive if v <= 0.0 => Err("must be greater than 0"),
+            NumRule::Decimals if !(0.0..=8.0).contains(&v) => Err("precision must be between 0 and 8"),
+            NumRule::Decimals => Ok(v.round().clamp(0.0, 8.0)),
+            _ => Ok(v),
+        }
+    }
+}
+
 /// One editable style property.
 enum Field {
-    Num(&'static str, &'static str, f64),
+    Num(&'static str, &'static str, f64, NumRule),
     Bool(&'static str, &'static str, bool),
     Choice(&'static str, &'static str, String, Vec<String>),
 }
@@ -318,8 +348,8 @@ fn text_style(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action 
         .map(|s| Style {
             name: s.name.clone(),
             fields: vec![
-                Field::Num("height", "Height (0 = ask)", s.height),
-                Field::Num("widthFactor", "Width factor", s.width_factor),
+                Field::Num("height", "Height (0 = ask)", s.height, NumRule::NonNegative),
+                Field::Num("widthFactor", "Width factor", s.width_factor, NumRule::Positive),
                 Field::Bool("backwards", "Backwards", s.backwards),
                 Field::Bool("upsideDown", "Upside down", s.upside_down),
             ],
@@ -345,14 +375,14 @@ fn dim_style(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
         .map(|s| Style {
             name: s.name.clone(),
             fields: vec![
-                Field::Num("scale", "Overall scale (DIMSCALE)", s.scale),
-                Field::Num("arrowSize", "Arrow size (DIMASZ)", s.arrow_size),
-                Field::Num("textHeight", "Text height (DIMTXT)", s.text_height),
-                Field::Num("extExtend", "Extension line extend (DIMEXE)", s.ext_extend),
-                Field::Num("extOffset", "Extension line offset (DIMEXO)", s.ext_offset),
-                Field::Num("textGap", "Text gap (DIMGAP)", s.text_gap),
-                Field::Num("baselineSpacing", "Baseline spacing (DIMDLI)", s.baseline_spacing),
-                Field::Num("decimals", "Precision decimals (DIMDEC)", s.decimals as f64),
+                Field::Num("scale", "Overall scale (DIMSCALE)", s.scale, NumRule::NonNegative),
+                Field::Num("arrowSize", "Arrow size (DIMASZ)", s.arrow_size, NumRule::NonNegative),
+                Field::Num("textHeight", "Text height (DIMTXT)", s.text_height, NumRule::Positive),
+                Field::Num("extExtend", "Extension line extend (DIMEXE)", s.ext_extend, NumRule::NonNegative),
+                Field::Num("extOffset", "Extension line offset (DIMEXO)", s.ext_offset, NumRule::NonNegative),
+                Field::Num("textGap", "Text gap (DIMGAP)", s.text_gap, NumRule::NonNegative),
+                Field::Num("baselineSpacing", "Baseline spacing (DIMDLI)", s.baseline_spacing, NumRule::NonNegative),
+                Field::Num("decimals", "Precision decimals (DIMDEC)", s.decimals as f64, NumRule::Decimals),
                 Field::Choice("textStyle", "Text style", s.text_style.clone(), text_styles.clone()),
                 Field::Bool("annotative", "Annotative", s.annotative),
                 Field::Bool("suppressExt1", "Suppress ext line 1", s.suppress_ext1),
@@ -383,8 +413,8 @@ fn table_style(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action
         .map(|s| Style {
             name: s.name.clone(),
             fields: vec![
-                Field::Num("textHeight", "Text height", s.text_height),
-                Field::Num("margin", "Cell margin", s.margin),
+                Field::Num("textHeight", "Text height", s.text_height, NumRule::Positive),
+                Field::Num("margin", "Cell margin", s.margin, NumRule::NonNegative),
                 Field::Bool("title", "Title row", s.title),
                 Field::Bool("header", "Header row", s.header),
             ],
@@ -410,10 +440,10 @@ fn mleader_style(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Acti
         .map(|s| Style {
             name: s.name.clone(),
             fields: vec![
-                Field::Num("arrowSize", "Arrowhead size", s.arrow_size),
-                Field::Num("textHeight", "Text height", s.text_height),
-                Field::Num("landingGap", "Landing gap", s.landing_gap),
-                Field::Num("dogleg", "Landing length", s.dogleg),
+                Field::Num("arrowSize", "Arrowhead size", s.arrow_size, NumRule::NonNegative),
+                Field::Num("textHeight", "Text height", s.text_height, NumRule::Positive),
+                Field::Num("landingGap", "Landing gap", s.landing_gap, NumRule::NonNegative),
+                Field::Num("dogleg", "Landing length", s.dogleg, NumRule::NonNegative),
                 Field::Choice("textStyle", "Text style", s.text_style.clone(), text_styles.clone()),
             ],
         })
@@ -432,8 +462,10 @@ fn style_manager(ctx: &egui::Context, open: &mut bool, title: &str, cmd: &'stati
     let t = Tokens::get();
     let sel_key = format!("{cmd}_sel");
     let new_key = format!("{cmd}_new");
+    let err_key = format!("{cmd}_err");
     let mut sel = temp::<String>(ctx, &sel_key).filter(|s| styles.iter().any(|x| x.name == *s)).unwrap_or_else(|| current.to_string());
     let mut new_name = temp::<String>(ctx, &new_key).unwrap_or_default();
+    let mut err_msg = temp::<String>(ctx, &err_key);
     let mut action = None;
     egui::Window::new(title).open(open).default_size(vec2(540.0, 320.0)).resizable(true).show(ctx, |ui| {
         ui.label(RichText::new(format!("Current style: {current}")).color(t.text_dim));
@@ -449,11 +481,13 @@ fn style_manager(ctx: &egui::Context, open: &mut bool, title: &str, cmd: &'stati
                     }
                     if ui.selectable_label(s.name == sel, label).clicked() {
                         sel = s.name.clone();
+                        err_msg = None;
                     }
                 }
             });
             if left.add_enabled(!sel.eq_ignore_ascii_case(current), egui::Button::new("Set Current")).clicked() {
                 action = Some((cmd, json!({ "name": sel })));
+                err_msg = None;
             }
             left.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut new_name).hint_text("New style name").desired_width(120.0));
@@ -463,22 +497,42 @@ fn style_manager(ctx: &egui::Context, open: &mut bool, title: &str, cmd: &'stati
                     action = Some((cmd, json!({ "name": name, "current": false })));
                     sel = name;
                     new_name.clear();
+                    err_msg = None;
                 }
             });
             right.label(RichText::new(format!("Properties of {sel}")).strong());
+            if let Some(err) = &err_msg {
+                right.colored_label(t.warn, err);
+            }
             let Some(style) = styles.iter().find(|s| s.name == sel) else { return };
             egui::ScrollArea::vertical().id_salt((cmd, "props_scroll")).max_height(200.0).auto_shrink([false, true]).show(right, |right| {
                 egui::Grid::new((cmd, "props")).num_columns(2).spacing(vec2(10.0, 6.0)).show(right, |ui| {
                     for f in &style.fields {
                         let change = match f {
-                            Field::Num(key, label, v) => {
+                            Field::Num(key, label, v, rule) => {
                                 ui.label(*label);
-                                num_field(ui, (cmd, &style.name, *key), *v).filter(|v| *v >= 0.0).map(|v| (*key, json!(v)))
+                                if let Some(raw) = num_field(ui, (cmd, &style.name, *key), *v) {
+                                    match rule.validate(raw) {
+                                        Ok(valid) => {
+                                            err_msg = None;
+                                            Some((*key, json!(valid)))
+                                        }
+                                        Err(why) => {
+                                            err_msg = Some(format!("{label}: {why}"));
+                                            None
+                                        }
+                                    }
+                                } else {
+                                    None
+                                }
                             }
                             Field::Bool(key, label, v) => {
                                 ui.label("");
                                 let mut b = *v;
-                                ui.checkbox(&mut b, *label).changed().then(|| (*key, json!(b)))
+                                ui.checkbox(&mut b, *label).changed().then(|| {
+                                    err_msg = None;
+                                    (*key, json!(b))
+                                })
                             }
                             Field::Choice(key, label, v, choices) => {
                                 ui.label(*label);
@@ -490,7 +544,10 @@ fn style_manager(ctx: &egui::Context, open: &mut bool, title: &str, cmd: &'stati
                                         }
                                     }
                                 });
-                                picked.map(|c| (*key, json!(c)))
+                                picked.map(|c| {
+                                    err_msg = None;
+                                    (*key, json!(c))
+                                })
                             }
                         };
                         if let Some((key, v)) = change {
@@ -504,6 +561,7 @@ fn style_manager(ctx: &egui::Context, open: &mut bool, title: &str, cmd: &'stati
     });
     set_temp(ctx, &sel_key, sel);
     set_temp(ctx, &new_key, new_name);
+    set_temp(ctx, &err_key, err_msg);
     action
 }
 

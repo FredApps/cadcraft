@@ -77,3 +77,49 @@ fn dimstyle_dialog_renders_and_preserves_state() {
     let d = app.session.doc().unwrap();
     assert!(d.dim_styles.iter().any(|s| s.name.eq_ignore_ascii_case("Standard")));
 }
+
+#[test]
+fn dimstyle_refuses_invalid_values_with_diagnostic() {
+    let mut app = CadApp::new(Session::new(), Services::default());
+    let r = app.run("dimstyle", json!({ "name": "Standard", "textHeight": 2.5, "decimals": 4, "current": false })).unwrap();
+    assert!(r.get("ignored").is_none());
+
+    let d = app.session.doc().unwrap();
+    let st = d.dim_style("Standard").unwrap();
+    assert_eq!(st.text_height, 2.5);
+    assert_eq!(st.decimals, 4);
+
+    // Text height 0 and precision 200 must be refused.
+    let r = app.run("dimstyle", json!({ "name": "Standard", "textHeight": 0.0, "decimals": 200, "current": false })).unwrap();
+    let ignored = r["ignored"].as_array().expect("ignored list");
+    assert!(ignored.iter().any(|v| v == "textHeight"));
+    assert!(ignored.iter().any(|v| v == "decimals"));
+    assert!(r["message"].as_str().unwrap().contains("Ignored invalid value"));
+
+    // Style retains valid values.
+    let d = app.session.doc().unwrap();
+    let st = d.dim_style("Standard").unwrap();
+    assert_eq!(st.text_height, 2.5);
+    assert_eq!(st.decimals, 4);
+}
+
+#[test]
+fn dimstyle_dialog_action_updates_style_properties() {
+    let mut app = CadApp::new(Session::new(), Services::default());
+    let ctx = egui::Context::default();
+    menus::activate(&mut app, "dimstyle");
+    assert_eq!(app.ui.dialog.as_deref(), Some("dimstyle"));
+
+    // Execute field update through the action mechanism.
+    app.run("dimstyle", json!({ "name": "Standard", "arrowSize": 3.5, "extExtend": 1.75, "current": false })).unwrap();
+    let d = app.session.doc().unwrap();
+    let st = d.dim_style("Standard").unwrap();
+    assert_eq!(st.arrow_size, 3.5);
+    assert_eq!(st.ext_extend, 1.75);
+
+    // Rendering frame with error present in context data displays warning without panicking.
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("dimstyle_err"), Some("Text height must be greater than 0".to_string())));
+    let mut out = ctx.run_ui(Default::default(), |ui| dialogs::show(&mut app, ui.ctx()));
+    out.textures_delta.clear();
+    assert_eq!(app.ui.dialog.as_deref(), Some("dimstyle"));
+}
