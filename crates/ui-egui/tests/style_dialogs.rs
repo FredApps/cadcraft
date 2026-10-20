@@ -127,10 +127,17 @@ fn dimstyle_dialog_action_updates_style_properties() {
     out.textures_delta.clear();
     assert_eq!(app.ui.dialog.as_deref(), Some("dimstyle"));
 
-    // Verify error message stored as Option<String> persists into subsequent frames.
+    // Verify error message stored as Option<String> is consumed and carried forward into subsequent frames.
     ctx.data_mut(|d| d.insert_temp(egui::Id::new("dimstyle_err"), Some("Text height must be greater than 0".to_string())));
-    let mut out = ctx.run_ui(Default::default(), |ui| dialogs::show(&mut app, ui.ctx()));
-    out.textures_delta.clear();
-    let err_after: Option<Option<String>> = ctx.data_mut(|d| d.get_temp(egui::Id::new("dimstyle_err")));
-    assert_eq!(err_after, Some(Some("Text height must be greater than 0".to_string())));
+    // Frame 1: dialog reads the stored Option<String> diagnostic and keeps it active.
+    let mut out1 = ctx.run_ui(Default::default(), |ui| dialogs::show(&mut app, ui.ctx()));
+    out1.textures_delta.clear();
+    let err_after_f1: Option<Option<String>> = ctx.data_mut(|d| d.get_temp(egui::Id::new("dimstyle_err")));
+    assert_eq!(err_after_f1, Some(Some("Text height must be greater than 0".to_string())));
+
+    // Frame 2: subsequent render without re-inserting proves the dialog preserved the message across frame boundaries.
+    let mut out2 = ctx.run_ui(Default::default(), |ui| dialogs::show(&mut app, ui.ctx()));
+    out2.textures_delta.clear();
+    let err_after_f2: Option<Option<String>> = ctx.data_mut(|d| d.get_temp(egui::Id::new("dimstyle_err")));
+    assert_eq!(err_after_f2, Some(Some("Text height must be greater than 0".to_string())));
 }
