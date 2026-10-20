@@ -16,10 +16,11 @@ env:
   # debug info the debug target directory passes 90 GB, far past a runner's disk.
   CARGO_PROFILE_DEV_DEBUG: 0
 
-# A newer push to a PR branch cancels its older run. Runs on main are never cancelled, so every
-# state of main that gets a run is checked to the end.
+# A newer push to a PR branch cancels its older run. Runs on main are never cancelled and each has
+# its own group (a shared group would drop all but the newest queued run), so every state of main
+# that gets a run is checked to the end.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -29,6 +30,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Unused toolchains in the image are deleted in the background: the space is free before the
       # build needs it, and nothing waits.
