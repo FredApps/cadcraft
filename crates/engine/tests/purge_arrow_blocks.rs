@@ -17,7 +17,7 @@ fn purge_keeps_arrowhead_blocks_dimension_styles_name() {
         b.entities.push(Entity::new(Handle(0x9000 + i as u64), EntityKind::Circle(Circle { center: Vec3::ZERO, radius: 0.5 })));
         d.blocks.insert(name.into(), Arc::new(b));
     }
-    d.dim_styles.push(DimStyle { name: "Dots".into(), arrow_block1: "_DOT".into(), leader_arrow_block: "MyArrow".into(), ..DimStyle::default() });
+    d.dim_styles.push(DimStyle { name: "Dots".into(), arrow_block1: " _DOT ".into(), leader_arrow_block: "MyArrow".into(), ..DimStyle::default() });
     let r = s.execute("purge", &json!({ "type": "blocks" })).unwrap();
     assert_eq!(r["purged"]["blocks"], json!(["Unused"]), "{r}");
     let d = s.doc().unwrap();

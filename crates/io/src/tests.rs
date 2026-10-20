@@ -876,6 +876,26 @@ fn user_block_arrowheads_are_referenced_not_regenerated() {
     assert_eq!(back.blocks.len(), d.blocks.len());
 }
 
+/// Every standard arrowhead CADCraft generates reads back as its own geometry, through DXF and
+/// DWG, so reopening a drawing CADCraft wrote never turns them into user blocks.
+#[test]
+fn generated_arrowhead_blocks_are_not_kept_as_user_blocks() {
+    let mut d = Drawing::new_metric();
+    for (i, (_, name)) in crate::dxf_ext::ARROWS.iter().enumerate() {
+        d.dim_styles.push(DimStyle { name: format!("S{i}"), arrow_block: (*name).into(), ..DimStyle::default() });
+    }
+    let dxf = write_dxf(&d);
+    for (_, name) in crate::dxf_ext::ARROWS.iter().filter(|(k, _)| *k != cadcraft_render::Arrowhead::ClosedFilled) {
+        assert!(dxf.contains(&format!("\r\n{name}\r\n")), "{name} is written");
+    }
+    let dwg = cadcraft_dwg::dxf_to_dwg(dxf.as_bytes()).unwrap();
+    let from_dwg = read_dxf(&cadcraft_dwg::dwg_to_dxf(&dwg).unwrap()).unwrap();
+    for (back, what) in [(read_dxf(dxf.as_bytes()).unwrap(), "DXF"), (from_dwg, "DWG")] {
+        assert!(back.blocks.keys().all(|k| !k.starts_with('_')), "{what}: {:?}", back.blocks.keys().collect::<Vec<_>>());
+        assert!(roundtrip(&back).blocks.keys().all(|k| !k.starts_with('_')), "{what}: second save");
+    }
+}
+
 /// A file's own arrowhead block with a standard name (AutoCAD's `_Dot` is a closed polyline
 /// with width, not CADCraft's disc of solids) is kept when only a dimension style names it, and
 /// saved as it was, through DXF and DWG, instead of being replaced by CADCraft's geometry.

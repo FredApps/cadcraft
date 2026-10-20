@@ -122,7 +122,8 @@ fn override_arrows(dm: &cadcraft_doc::Dimension) -> impl Iterator<Item = String>
     dm.overrides
         .iter()
         .filter(|(k, _)| cadcraft_doc::DimStyle::field_name(k).is_some_and(|f| f.starts_with("arrowBlock") || f == "leaderArrowBlock"))
-        .filter_map(|(_, v)| v.as_str().map(str::to_string))
+        .filter_map(|(_, v)| v.as_str().map(|n| n.trim().to_string()))
+        .filter(|n| !n.is_empty())
 }
 
 /// Upper-case names of blocks reachable from model space, the layouts and dimensions, and the
@@ -132,7 +133,10 @@ fn used_blocks(d: &Drawing) -> HashSet<String> {
     let mut frontier: Vec<String> = Vec::new();
     for st in &d.dim_styles {
         frontier.extend(
-            [&st.arrow_block, &st.arrow_block1, &st.arrow_block2, &st.leader_arrow_block].into_iter().filter(|n| !n.trim().is_empty()).cloned(),
+            [&st.arrow_block, &st.arrow_block1, &st.arrow_block2, &st.leader_arrow_block]
+                .into_iter()
+                .map(|n| n.trim().to_string())
+                .filter(|n| !n.is_empty()),
         );
     }
     for e in d.model.iter().chain(d.layouts.iter().flat_map(|l| l.entities.iter())) {
