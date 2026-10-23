@@ -551,7 +551,14 @@ struct Local {
     alt: Option<String>,
     /// Glyph outlines, in front of the shared [`glyph_cache`] (whose lock every core reads).
     glyphs: HashMap<GlyphCacheKey, Arc<GlyphOutline>>,
+    /// The points of the outlines in `glyphs`, held within [`MAX_LOCAL_GLYPH_POINTS`].
+    glyph_points: usize,
 }
+
+/// Most outline points each thread keeps in front of the shared cache: a part of its budget, since
+/// every core has its own and they keep outlines alive after the shared cache lets them go. An
+/// outline above a quarter of it is read from the shared cache each time.
+const MAX_LOCAL_GLYPH_POINTS: usize = MAX_SHAPED_POINTS / 16;
 
 thread_local! {
     static LOCAL: RefCell<Local> = RefCell::new(Local::default());
@@ -868,13 +875,26 @@ fn outline(face: &Face, k: GlyphKey) -> Arc<GlyphOutline> {
         return g;
     }
     let g = outline_shared(face, key);
-    local(|l| {
-        if l.glyphs.len() >= MAX_LOCAL {
-            l.glyphs.clear();
-        }
-        l.glyphs.insert(key, g.clone());
-    });
+    local(|l| l.keep_glyph(key, &g));
     g
+}
+
+impl Local {
+    /// Keep an outline in front of the shared cache, within [`MAX_LOCAL`] entries and
+    /// [`MAX_LOCAL_GLYPH_POINTS`] points (started over when either would be passed); an outline
+    /// above a quarter of the points isn't kept.
+    fn keep_glyph(&mut self, key: GlyphCacheKey, g: &Arc<GlyphOutline>) {
+        if g.points > MAX_LOCAL_GLYPH_POINTS / 4 {
+            return;
+        }
+        if self.glyphs.len() >= MAX_LOCAL || self.glyph_points.saturating_add(g.points) > MAX_LOCAL_GLYPH_POINTS {
+            self.glyphs.clear();
+            self.glyph_points = 0;
+        }
+        if self.glyphs.insert(key, g.clone()).is_none() {
+            self.glyph_points = self.glyph_points.saturating_add(g.points);
+        }
+    }
 }
 
 /// [`outline`] through the shared cache.
@@ -1142,8 +1162,27 @@ mod local_cache_tests {
         let now = generation();
         keep(now, |l| l.alt = Some("fresh".into()));
         // Kept unless yet another change came in between (other tests may register fonts).
+        let cached = local(|l| l.alt.clone());
         if generation() == now {
-            assert_eq!(local(|l| l.alt.clone()), Some("fresh".to_string()));
+            assert_eq!(cached, Some("fresh".to_string()));
         }
+    }
+
+    /// Each thread's outlines stay within [`MAX_LOCAL_GLYPH_POINTS`], and an outline too large
+    /// for it isn't kept.
+    #[test]
+    fn a_threads_outlines_stay_within_their_point_budget() {
+        let mut l = Local::default();
+        let key = |i: u32| (0usize, 0usize, 0u32, GlyphKey::Id(i));
+        let big = MAX_LOCAL_GLYPH_POINTS / 8;
+        let g = Arc::new(GlyphOutline { points: big, cap: 1.0, ..Default::default() });
+        for i in 0..100 {
+            l.keep_glyph(key(i), &g);
+            assert!(l.glyph_points <= MAX_LOCAL_GLYPH_POINTS, "{}", l.glyph_points);
+            assert_eq!(l.glyph_points, l.glyphs.len() * big);
+        }
+        let huge = Arc::new(GlyphOutline { points: MAX_LOCAL_GLYPH_POINTS / 2, cap: 1.0, ..Default::default() });
+        l.keep_glyph(key(500), &huge);
+        assert!(!l.glyphs.contains_key(&key(500)), "an outline above a quarter of the budget isn't kept");
     }
 }
