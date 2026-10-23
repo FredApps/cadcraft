@@ -508,7 +508,31 @@ fn is_stroke_name(k: &str) -> bool {
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 fn changed() {
-    GENERATION.fetch_add(1, Ordering::Relaxed);
+    // Release: a thread that sees the new generation also sees what changed.
+    GENERATION.fetch_add(1, Ordering::Release);
+}
+
+/// The generation now, taken before a lookup whose answer [`keep`] may cache.
+fn generation() -> u64 {
+    GENERATION.load(Ordering::Acquire)
+}
+
+/// `f` on this thread's cache, only when lookups haven't changed since `seen` ([`generation`]
+/// before the lookup): an answer found while a font was being registered may be the old one, and
+/// is used once but not kept.
+fn keep(seen: u64, f: impl FnOnce(&mut Local)) {
+    LOCAL.with(|l| {
+        let mut l = l.borrow_mut();
+        // Kept under `seen` itself: should lookups change after this check, the next lookup
+        // finds a newer generation and starts over without it.
+        if generation() != seen {
+            return;
+        }
+        if l.generation != seen {
+            *l = Local { generation: seen, ..Local::default() };
+        }
+        f(&mut l);
+    });
 }
 
 /// Most entries each per-thread cache holds before it starts over.
@@ -537,7 +561,7 @@ thread_local! {
 fn local<R>(f: impl FnOnce(&mut Local) -> R) -> R {
     LOCAL.with(|l| {
         let mut l = l.borrow_mut();
-        let generation = GENERATION.load(Ordering::Relaxed);
+        let generation = generation();
         if l.generation != generation {
             *l = Local { generation, ..Local::default() };
         }
@@ -551,8 +575,9 @@ pub fn find(name: &str) -> Option<Face> {
     if let Some(r) = local(|l| l.find.get(name).cloned()) {
         return r;
     }
+    let seen = generation();
     let r = find_shared(name);
-    local(|l| {
+    keep(seen, |l| {
         if l.find.len() >= MAX_LOCAL {
             l.find.clear();
         }
@@ -613,8 +638,9 @@ pub fn font_alt() -> String {
     if let Some(a) = local(|l| l.alt.clone()) {
         return a;
     }
+    let seen = generation();
     let a = prefs().alt.clone();
-    local(|l| l.alt = Some(a.clone()));
+    keep(seen, |l| l.alt = Some(a.clone()));
     a
 }
 
@@ -650,8 +676,9 @@ pub fn fallback_for(c: char) -> Option<Face> {
     if let Some(r) = local(|l| l.fallback.get(&c).cloned()) {
         return r;
     }
+    let seen = generation();
     let r = fallback_shared(c);
-    local(|l| {
+    keep(seen, |l| {
         if l.fallback.len() >= MAX_LOCAL {
             l.fallback.clear();
         }
@@ -1097,5 +1124,26 @@ mod geometry_budget_tests {
         assert!(!shaped.is_empty());
         assert_eq!(shaped.glyphs, vec![contours]);
         assert!(shaped.text.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod local_cache_tests {
+    use super::*;
+
+    /// An answer looked up while lookups changed (a font registered meanwhile) is not kept: the
+    /// thread asks again instead of keeping a stale "not found".
+    #[test]
+    fn a_lookup_overtaken_by_a_change_is_not_kept() {
+        let seen = generation();
+        changed();
+        keep(seen, |l| l.alt = Some("stale".into()));
+        assert_ne!(local(|l| l.alt.clone()), Some("stale".to_string()));
+        let now = generation();
+        keep(now, |l| l.alt = Some("fresh".into()));
+        // Kept unless yet another change came in between (other tests may register fonts).
+        if generation() == now {
+            assert_eq!(local(|l| l.alt.clone()), Some("fresh".to_string()));
+        }
     }
 }

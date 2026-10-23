@@ -79,30 +79,62 @@ fn detail(xf: Mat3, pixel: f64) -> Detail {
 
 /// Most meshes each thread keeps in front of the shared cache.
 const MAX_LOCAL_ENTRIES: usize = 4096;
+/// Most memory each thread's meshes hold: display lists are built on every core, and CJK text at
+/// full detail makes large meshes, so a count alone doesn't bound it. A mesh above a quarter of
+/// it is read from the shared cache each time instead.
+const MAX_LOCAL_BYTES: usize = 16 << 20;
+
+#[derive(Default)]
+struct Local {
+    entries: HashMap<Key, Entry>,
+    bytes: usize,
+}
 
 thread_local! {
     /// This thread's meshes, in front of the shared [`cache`]: display lists are built on all
     /// cores, and every placed glyph reading the shared lock made text-heavy drawings (CJK text
     /// is all filled glyphs) wait on it (#662, #666). Entries keep their face alive like the
     /// shared ones, so a key's address is never reused while it is here.
-    static LOCAL: std::cell::RefCell<HashMap<Key, Entry>> = std::cell::RefCell::new(HashMap::new());
+    static LOCAL: std::cell::RefCell<Local> = std::cell::RefCell::new(Local::default());
 }
 
 pub(super) fn mesh(g: &TextGlyph, xf: Mat3, pixel: f64) -> Arc<Mesh> {
     let detail = detail(xf, pixel);
     let key = (g.face.bytes.as_ptr() as usize, g.face.bytes.len(), g.face.index, g.gid, detail);
-    if let Some(m) = LOCAL.with(|l| l.borrow().get(&key).map(|e| e.mesh.clone())) {
+    if let Some(m) = LOCAL.with(|l| l.borrow().entries.get(&key).map(|e| e.mesh.clone())) {
         return m;
     }
     let m = mesh_shared(g, key, detail);
     LOCAL.with(|l| {
-        let mut l = l.borrow_mut();
-        if l.len() >= MAX_LOCAL_ENTRIES {
-            l.clear();
-        }
-        l.insert(key, Entry { _face: g.face.clone(), mesh: m.clone() });
+        let l = &mut *l.borrow_mut();
+        remember(&mut l.entries, &mut l.bytes, key, || Entry { _face: g.face.clone(), mesh: m.clone() }, mesh_bytes(&m));
     });
     m
+}
+
+/// Keep `value` (about `bytes` of memory) in a per-thread cache holding `total` bytes: started
+/// over when it would pass [`MAX_LOCAL_ENTRIES`] or [`MAX_LOCAL_BYTES`], and a value above a
+/// quarter of the budget isn't kept at all.
+fn remember<T>(entries: &mut HashMap<Key, T>, total: &mut usize, key: Key, value: impl FnOnce() -> T, bytes: usize) {
+    if bytes > MAX_LOCAL_BYTES / 4 {
+        return;
+    }
+    if entries.len() >= MAX_LOCAL_ENTRIES || total.saturating_add(bytes) > MAX_LOCAL_BYTES {
+        entries.clear();
+        *total = 0;
+    }
+    if entries.insert(key, value()).is_none() {
+        *total = total.saturating_add(bytes);
+    }
+}
+
+/// About how much memory a cached mesh holds (its points and triangles as allocated).
+fn mesh_bytes(mesh: &Mesh) -> usize {
+    let points = mesh.contours.iter().map(Vec::capacity).sum::<usize>().saturating_add(mesh.triangles.capacity());
+    points
+        .saturating_mul(std::mem::size_of::<Vec2>())
+        .saturating_add(mesh.contours.len().saturating_mul(std::mem::size_of::<Vec<Vec2>>()))
+        .saturating_add(std::mem::size_of::<Entry>() + std::mem::size_of::<Key>() + std::mem::size_of::<Mesh>())
 }
 
 /// [`mesh`] through the shared cache.
@@ -129,11 +161,7 @@ fn mesh_shared(g: &TextGlyph, key: Key, detail: Detail) -> Arc<Mesh> {
         }
     };
     let mesh = Arc::new(Mesh { triangles: triangulate(&contours), contours });
-    let points = mesh.contours.iter().map(Vec::capacity).sum::<usize>().saturating_add(mesh.triangles.capacity());
-    let bytes = points
-        .saturating_mul(std::mem::size_of::<Vec2>())
-        .saturating_add(mesh.contours.len().saturating_mul(std::mem::size_of::<Vec<Vec2>>()))
-        .saturating_add(std::mem::size_of::<Entry>() + std::mem::size_of::<Key>() + std::mem::size_of::<Mesh>());
+    let bytes = mesh_bytes(&mesh);
     if bytes <= MAX_CACHE_BYTES {
         let mut c = cache().write().unwrap_or_else(PoisonError::into_inner);
         if c.entries.len() >= MAX_ENTRIES || c.bytes.saturating_add(bytes) > MAX_CACHE_BYTES {
@@ -225,4 +253,24 @@ fn triangulate(contours: &[Vec<Vec2>]) -> Vec<Vec2> {
         return crate::fill::triangulate_evenodd(contours);
     }
     buffers.indices.into_iter().filter_map(|i| buffers.vertices.get(usize::from(i)).copied()).collect()
+}
+
+#[cfg(test)]
+mod local_cache_tests {
+    use super::*;
+
+    /// Each thread's meshes stay within [`MAX_LOCAL_BYTES`], and a mesh too large for it isn't kept.
+    #[test]
+    fn a_threads_meshes_stay_within_their_byte_budget() {
+        let (mut entries, mut total) = (HashMap::new(), 0usize);
+        let key = |i: u16| (0usize, 0usize, 0u32, i, Detail::Full);
+        let big = MAX_LOCAL_BYTES / 8;
+        for i in 0..100 {
+            remember(&mut entries, &mut total, key(i), || (), big);
+            assert!(total <= MAX_LOCAL_BYTES, "{total}");
+            assert_eq!(total, entries.len() * big);
+        }
+        remember(&mut entries, &mut total, key(500), || (), MAX_LOCAL_BYTES / 2);
+        assert!(!entries.contains_key(&key(500)), "a mesh above a quarter of the budget isn't kept");
+    }
 }
