@@ -99,7 +99,21 @@ pub(crate) fn arrow_geometry(b: &cadcraft_doc::Block) -> Option<ArrowGeom> {
         }
         out
     };
+    // Points worked out at most (strokes and fill triangles together): past it the arrowhead
+    // is not drawn from the block (the built-in one is), so a block of huge or many curves can't
+    // stall drawing every dimension that uses it.
+    const MAX_POINTS: usize = 200_000;
+    let used = |g: &ArrowGeom| g.lines.iter().map(Vec::len).sum::<usize>().saturating_add(g.tris.len());
     for e in b.entities.iter().take(512) {
+        // What this object may add before it is worked out: its vertices, every arc sampled.
+        let input = match &e.kind {
+            K::LwPolyline(p) => p.vertices.len().saturating_mul(SEGS),
+            K::Hatch(h) => h.loops.iter().map(|l| l.vertices.len()).sum::<usize>().saturating_mul(SEGS),
+            _ => SEGS,
+        };
+        if used(&g).saturating_add(input) > MAX_POINTS {
+            return None;
+        }
         match &e.kind {
             K::Line(l) => g.lines.push(vec![l.a.xy() - base, l.b.xy() - base]),
             K::Circle(c) => g.lines.push(arc_pts(c.center.xy(), c.radius, 0.0, std::f64::consts::TAU)),
@@ -136,7 +150,7 @@ pub(crate) fn arrow_geometry(b: &cadcraft_doc::Block) -> Option<ArrowGeom> {
             _ => {}
         }
     }
-    let ok = g.lines.iter().flatten().chain(&g.tris).all(|p| p.is_finite());
+    let ok = used(&g) <= MAX_POINTS && g.lines.iter().flatten().chain(&g.tris).all(|p| p.is_finite());
     (ok && !(g.lines.is_empty() && g.tris.is_empty())).then_some(g)
 }
 
