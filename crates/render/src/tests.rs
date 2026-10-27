@@ -1054,3 +1054,37 @@ fn user_arrowheads_keep_holes_and_tapers() {
     let area: f64 = g.tris.chunks(3).map(|t| ((t[1] - t[0]).cross(t[2] - t[0]) / 2.0).abs()).sum();
     assert!((area - 0.5).abs() < 1e-6, "a triangle of base 1 and length 1: {area}");
 }
+
+/// A user arrowhead's solid hatch is filled by its island detection style, as the hatch itself
+/// is drawn: Normal alternates, Outer keeps the first islands, Ignore fills the outline whole.
+#[test]
+fn user_arrowheads_follow_the_hatch_island_style() {
+    use cadcraft_doc::{Block, Entity, EntityKind, Handle, Hatch, HatchLoop};
+    use cadcraft_geom::PolyVertex;
+    let sq = |a: f64, b: f64| HatchLoop {
+        vertices: [(a, a), (b, a), (b, b), (a, b)].iter().map(|(x, y)| PolyVertex::new(Vec2::new(*x, *y))).collect(),
+        outer: a == 0.0,
+        sources: Vec::new(),
+    };
+    for (style, want) in [(0u8, 0.79), (1, 0.75), (2, 1.0)] {
+        let hatch = Hatch {
+            pattern: "SOLID".into(),
+            solid: true,
+            loops: vec![sq(0.0, 1.0), sq(0.25, 0.75), sq(0.4, 0.6)],
+            scale: 1.0,
+            angle: 0.0,
+            associative: false,
+            style,
+            elevation: 0.0,
+            gradient: None,
+            origin: Vec2::ZERO,
+            background: None,
+            pattern_lines: Vec::new(),
+        };
+        let mut b = Block::new("ISLANDS");
+        b.entities.push(Entity::new(Handle(1), EntityKind::Hatch(hatch)));
+        let g = crate::dim_draw::arrow_geometry(&b).expect("geometry");
+        let area: f64 = g.tris.chunks(3).map(|t| ((t[1] - t[0]).cross(t[2] - t[0]) / 2.0).abs()).sum();
+        assert!((area - want).abs() < 1e-6, "style {style}: {area}");
+    }
+}

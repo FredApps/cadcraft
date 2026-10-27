@@ -114,6 +114,8 @@ fn attribute_and_multileader_formulas_roundtrip() {
         style: "Standard".into(),
         arrow_size: 1.0,
         spline: false,
+        no_leader: false,
+        arrow: String::new(),
         block: None,
     };
     d.add(&Space::Model, Common::default(), EntityKind::MLeader(ml)).unwrap();
