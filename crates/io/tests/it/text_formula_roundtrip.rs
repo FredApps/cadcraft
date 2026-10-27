@@ -37,6 +37,9 @@ fn text_and_mtext_formulas_roundtrip() {
     };
     d.add(&Space::Model, Common::default(), EntityKind::MText(m)).unwrap();
     let bytes = cadcraft_io::write(&d, "a.dxf").unwrap();
+    // The xdata application is registered (AutoCAD refuses xdata of an unknown application).
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("APPID") && text.matches("CADCRAFTFORMULA").count() >= 3, "registered once, used twice");
     let back = cadcraft_io::read(&bytes, "a.dxf").unwrap();
     let kinds: Vec<EntityKind> = back.model.iter().map(|e| e.kind.clone()).collect();
     assert!(kinds.iter().any(|k| matches!(k, EntityKind::Text(t) if t.formula.as_deref() == Some("=1+1"))));
