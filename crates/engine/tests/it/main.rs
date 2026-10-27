@@ -48,6 +48,7 @@ mod grip_selection;
 mod group_selection;
 mod groups;
 mod hatch_assoc;
+mod hatch_background_property;
 mod hatch_dialog_helpers;
 mod hatch_numeric_validation;
 mod hatch_options;
