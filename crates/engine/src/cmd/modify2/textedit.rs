@@ -49,6 +49,11 @@ pub(crate) fn set_text(s: &mut Session, h: Handle, text: &str) -> Result<()> {
 }
 
 pub(super) fn run_updatefield(s: &mut Session, _p: &Value) -> Result<Value> {
+    // Without a formula or field the drawing is left as it is (not marked changed).
+    if !crate::textformula::has_any(s.doc()?) {
+        s.echo("0 field(s) updated");
+        return Ok(json!({ "updated": 0 }));
+    }
     let env = crate::textformula::env(s);
     let n = crate::textformula::refresh(s.doc_mut()?, &env);
     s.echo(format!("{n} field(s) updated"));

@@ -228,6 +228,7 @@ pub(super) fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
             if cx.target >= Version::R2007 {
                 multiline_tags(w, a, true);
             }
+            formula_xdata(w, a.text.formula.as_deref());
         }
         EntityKind::MText(t) => {
             w.s(0, "MTEXT");
@@ -293,6 +294,7 @@ pub(super) fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
                     if cx.target >= Version::R2007 {
                         multiline_tags(w, a, false);
                     }
+                    formula_xdata(w, a.text.formula.as_deref());
                 }
                 let sh = w.h();
                 w.s(0, "SEQEND");
@@ -458,6 +460,7 @@ pub(super) fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
                 block: m.block.as_ref().and_then(|b| cx.block_records.get(&b.block.to_ascii_uppercase()).cloned()),
             };
             w.t.extend(crate::dxf_mleader::entity_tags(d, m, &refs));
+            formula_xdata(w, m.text.as_ref().and_then(|t| t.formula.as_deref()));
         }
         EntityKind::Leader(l) => {
             w.s(0, "LEADER");
