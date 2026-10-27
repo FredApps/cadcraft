@@ -264,6 +264,11 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
     let dim_over = dim_overrides(p)?;
     let anno_scale = d.current_anno_scale();
     for h in &hs {
+        // A dimension's measurement, which `<>` in a new formula stands for.
+        let formula_env = match d.entity(*h).map(|e| &e.kind) {
+            Some(EntityKind::Dimension(dm)) => crate::textformula::Env { measured: crate::textformula::measured(d, dm), ..formula_env.clone() },
+            _ => formula_env.clone(),
+        };
         d.modify_entity(*h, |e| {
             let mut new_text = false;
             // The text style of text, multiline text and a multileader's text.
@@ -463,6 +468,8 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                     if let Some(v) = str_param(p, "textOverride") {
                         dm.text = v.to_string();
                         dm.block = None;
+                        // Like typing over it: a formula becomes the formula, other text drops it.
+                        new_text = true;
                     }
                     if let Some(st) = &dim_style {
                         dm.style.clone_from(st);

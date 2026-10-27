@@ -1229,7 +1229,8 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
                         set = Some(json!({ "handles": ids, "dimStyle": n }));
                     }
                 });
-                prop_row(ui, "Measurement", |ui| read_only(ui, &cadcraft_render::dimension_in(d, dm).value));
+                // The measurement itself; the text that replaces it is the next row.
+                prop_row(ui, "Measurement", |ui| read_only(ui, &cadcraft_render::measurement_text(d, dm)));
                 prop_row(ui, "Text override", |ui| {
                     if let Some(s) = edit_field(ui, ui.scope_id().with(("dimtxt", &ids)), dm.text.clone()) {
                         set = Some(json!({ "handles": ids, "textOverride": s }));

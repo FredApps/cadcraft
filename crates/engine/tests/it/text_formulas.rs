@@ -132,3 +132,83 @@ fn a_dimension_formula_uses_the_measurement_not_the_shown_text() {
     let EntityKind::Dimension(dm) = &d.model.iter().find(|e| e.handle.hex() == h).unwrap().kind else { panic!() };
     assert_eq!(cadcraft_render::dimension_in(d, dm).value, "625");
 }
+
+/// The stored text of a `=<>/2` dimension with a DIMPOST prefix is the formula's result
+/// (properties and DXF group 1 show it), not a number read from the prefix (#2318 review).
+#[test]
+fn a_dimension_formula_stores_its_result_with_a_prefix() {
+    let mut s = Session::new();
+    s.execute("setvar", &json!({ "name": "DIMPOST", "value": "2X<>" })).unwrap();
+    let r = s.execute("dimlinear", &json!({ "p1": [0, 0], "p2": [1250, 0], "at": [600, 100] })).unwrap();
+    let h = r["handle"].as_str().or_else(|| r["handles"][0].as_str()).unwrap().to_string();
+    s.execute("textedit", &json!({ "handle": h, "text": "=<>/2" })).unwrap();
+    s.execute("updatefield", &json!({})).unwrap();
+    let d = s.doc().unwrap();
+    let EntityKind::Dimension(dm) = &d.model.iter().find(|e| e.handle.hex() == h).unwrap().kind else { panic!() };
+    assert_eq!(dm.text, "625");
+    let back = cadcraft_io::read_dxf(cadcraft_io::write_dxf(d).as_bytes()).unwrap();
+    let dm = back.model.iter().find_map(|e| if let EntityKind::Dimension(dm) = &e.kind { Some(dm.clone()) } else { None }).unwrap();
+    assert_eq!((dm.text.as_str(), dm.marks.formula.as_deref()), ("625", Some("=<>/2")));
+}
+
+/// Typing a plain override in the properties drops a dimension's formula; UPDATEFIELD keeps
+/// the typed text (#2318 review).
+#[test]
+fn a_dimension_override_in_properties_replaces_its_formula() {
+    let mut s = Session::new();
+    let r = s.execute("dimlinear", &json!({ "p1": [0, 0], "p2": [1250, 0], "at": [600, 100] })).unwrap();
+    let h = r["handle"].as_str().or_else(|| r["handles"][0].as_str()).unwrap().to_string();
+    s.execute("textedit", &json!({ "handle": h, "text": "=<>/2" })).unwrap();
+    s.execute("properties.set", &json!({ "handles": [h], "textOverride": "ABC" })).unwrap();
+    s.execute("updatefield", &json!({})).unwrap();
+    let d = s.doc().unwrap();
+    let EntityKind::Dimension(dm) = &d.model.iter().find(|e| e.handle.hex() == h).unwrap().kind else { panic!() };
+    assert_eq!((dm.text.as_str(), dm.marks.formula.as_deref()), ("ABC", None));
+    assert_eq!(cadcraft_render::dimension_in(d, dm).value, "ABC");
+    // A formula typed there becomes the formula, `<>` the measurement.
+    s.execute("properties.set", &json!({ "handles": [h], "textOverride": "=<>*2" })).unwrap();
+    let d = s.doc().unwrap();
+    let EntityKind::Dimension(dm) = &d.model.iter().find(|e| e.handle.hex() == h).unwrap().kind else { panic!() };
+    assert_eq!((dm.text.as_str(), dm.marks.formula.as_deref()), ("2500", Some("=<>*2")));
+}
+
+/// TXT2MTXT of one text keeps its formula, which still recalculates (#2318 review).
+#[test]
+fn txt2mtxt_keeps_a_texts_formula() {
+    let mut s = Session::new();
+    let r = s.execute("text", &json!({ "at": [0, 0], "height": 1, "text": "=2+3" })).unwrap();
+    let h = r["handle"].as_str().or_else(|| r["handles"][0].as_str()).unwrap().to_string();
+    s.execute("txt2mtxt", &json!({ "handles": [h], "combine": false })).unwrap();
+    let mt = s.doc().unwrap().model.iter().find_map(|e| if let EntityKind::MText(t) = &e.kind { Some(t.clone()) } else { None }).unwrap();
+    assert_eq!((cadcraft_fonts::plain_mtext(&mt.contents).as_str(), mt.formula.as_deref()), ("5", Some("=2+3")));
+}
+
+/// One-line text keeps braces and backslashes in its formula: they are letters there, not
+/// multiline formatting (#2318 review).
+#[test]
+fn one_line_text_formulas_keep_braces() {
+    let mut s = Session::new();
+    s.execute("text", &json!({ "at": [0, 0], "height": 1, "text": "=LEN(\"a{b}\")" })).unwrap();
+    s.execute("text", &json!({ "at": [0, 5], "height": 1, "text": "=UPPER(\"{a}\\x\")" })).unwrap();
+    let got: Vec<(String, Option<String>)> = s
+        .doc()
+        .unwrap()
+        .model
+        .iter()
+        .filter_map(|e| if let EntityKind::Text(t) = &e.kind { Some((t.value.clone(), t.formula.clone())) } else { None })
+        .collect();
+    assert_eq!(got, [("4".to_string(), Some("=LEN(\"a{b}\")".to_string())), ("{A}\\X".to_string(), Some("=UPPER(\"{a}\\x\")".to_string()))]);
+}
+
+/// The Measurement property is the measurement, not the text that replaces it (#2322 review).
+#[test]
+fn the_measurement_property_ignores_the_override() {
+    let mut s = Session::new();
+    let r = s.execute("dimlinear", &json!({ "p1": [0, 0], "p2": [1250, 0], "at": [600, 100] })).unwrap();
+    let h = r["handle"].as_str().or_else(|| r["handles"][0].as_str()).unwrap().to_string();
+    s.execute("properties.set", &json!({ "handles": [h], "textOverride": "TYP" })).unwrap();
+    let d = s.doc().unwrap();
+    let EntityKind::Dimension(dm) = &d.model.iter().find(|e| e.handle.hex() == h).unwrap().kind else { panic!() };
+    assert_eq!(cadcraft_render::dimension_in(d, dm).value, "TYP");
+    assert_eq!(cadcraft_render::measurement_text(d, dm), "1250.0000");
+}
