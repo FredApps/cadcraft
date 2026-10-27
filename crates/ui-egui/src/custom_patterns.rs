@@ -92,13 +92,16 @@ pub fn scan(folder: &str) -> (Vec<Found>, Option<String>) {
     (out, problem)
 }
 
-/// The folder's patterns, read again when the folder or the reload count changed.
+/// The folder's patterns, read again when the folder or the reload count changed; while
+/// `typing` the folder, the last listing stays (a folder isn't read on every keystroke).
 /// Shared, not copied: the tab asks for it every frame and a folder may hold thousands.
-fn listing(folder: &str) -> (std::rc::Rc<Vec<Found>>, Option<String>) {
+fn listing(folder: &str, typing: bool) -> (std::rc::Rc<Vec<Found>>, Option<String>) {
     let generation = GENERATION.with(|g| *g.borrow());
     LISTING.with(|cell| {
         let mut l = cell.borrow_mut();
-        if l.folder != folder || l.generation != generation {
+        let stale = l.folder != folder || l.generation != generation;
+        // The first listing, or a reload, is read even while typing.
+        if stale && (!typing || l.generation == u64::MAX || l.folder == folder) {
             let (patterns, problem) = scan(folder);
             *l = Listing { folder: folder.to_string(), generation, patterns: std::rc::Rc::new(patterns), problem };
         }
@@ -139,10 +142,11 @@ pub enum TabAction {
 /// `pattern` and `file`.
 pub fn tab_ui(ui: &mut egui::Ui, folder: &mut String, pattern: &mut String, file: &mut Option<String>, can_browse: bool) -> TabAction {
     let mut action = TabAction::None;
+    let mut typing = false;
     ui.label(crate::tl!("Folder with hatch pattern files (.pat):"));
     ui.horizontal(|ui| {
         let w = ui.available_width() - if can_browse { 150.0 } else { 70.0 };
-        ui.add(egui::TextEdit::singleline(folder).desired_width(w.max(120.0)).hint_text(crate::tl!("Folder path")));
+        typing = ui.add(egui::TextEdit::singleline(folder).desired_width(w.max(120.0)).hint_text(crate::tl!("Folder path"))).has_focus();
         if can_browse && ui.button(crate::tl!("Browse...")).clicked() {
             action = TabAction::Browse;
         }
@@ -150,7 +154,7 @@ pub fn tab_ui(ui: &mut egui::Ui, folder: &mut String, pattern: &mut String, file
             reload();
         }
     });
-    let (found, problem) = listing(folder);
+    let (found, problem) = listing(folder, typing);
     if let Some(p) = &problem {
         ui.colored_label(Tokens::get().text_dim, p);
     }
@@ -224,6 +228,23 @@ mod tests {
             assert!(!found.iter().any(|f| f.name == "OUTSIDE"), "a link is skipped");
             let _ = std::fs::remove_file(outside);
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// While the folder is being typed it isn't read on every keystroke; once typing stops
+    /// it is.
+    #[test]
+    fn a_folder_being_typed_is_read_once_typing_stops() {
+        let dir = std::env::temp_dir().join(format!("cadcraft-typing-pat-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.pat"), "*ONE, one\n0, 0,0, 0,1\n").unwrap();
+        let full = dir.to_string_lossy().to_string();
+        let (first, _) = super::listing("", false);
+        assert!(first.is_empty());
+        let (typing, _) = super::listing(&full, true);
+        assert!(typing.is_empty(), "the last listing stays while typing");
+        let (done, _) = super::listing(&full, false);
+        assert_eq!(done.len(), 1);
         let _ = std::fs::remove_dir_all(dir);
     }
 
