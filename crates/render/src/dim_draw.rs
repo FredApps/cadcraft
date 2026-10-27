@@ -126,9 +126,11 @@ pub(crate) fn arrow_geometry(b: &cadcraft_doc::Block) -> Option<ArrowGeom> {
                 }
             }
             K::Hatch(h) if h.solid => {
-                // Its loops together, even-odd: an island stays a hole, a concave outline is
-                // filled as it is.
-                let loops: Vec<Vec<Vec2>> = h.loops.iter().map(|l| poly_pts(&l.vertices, true)).collect();
+                // The loops its island detection fills (as the hatch itself is drawn), together
+                // even-odd: an island stays a hole, a concave outline is filled as it is.
+                let size = Bounds2::from_points(h.loops.iter().flat_map(|l| l.vertices.iter().map(|v| v.p)));
+                let tol = ((size.width() + size.height()) / 2000.0).max(1e-9);
+                let loops: Vec<Vec<Vec2>> = crate::hatch::fill_loops(h, tol).into_iter().map(|l| l.into_iter().map(|p| p - base).collect()).collect();
                 g.tris.extend(fill::triangulate_evenodd(&loops));
             }
             _ => {}
