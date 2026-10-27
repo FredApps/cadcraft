@@ -196,22 +196,23 @@ pub(super) fn stretched(s: &Session, hot: &[(Handle, usize)], others: &[Handle],
     };
     // Grip `i` of `e`: where it is shown (to match connected grips) and its stored point (moved
     // by `delta`); a dimension's line grip is shown on the dimension line, not at its point.
-    let grip = |e: &Entity, i: usize| -> Option<(Vec2, Vec2)> {
-        Some((*crate::grips::grip_points(d, &e.kind).get(i)?, *as_shown(d, &e.kind).grips().get(i)?))
-    };
+    // Worked out once per object (a dimension's shown grips need its geometry).
+    let grips_of = |h: Handle| d.entity(h).map(|e| (crate::grips::grip_points(d, &e.kind), as_shown(d, &e.kind).grips()));
+    let others: Vec<(Handle, Vec<Vec2>, Vec<Vec2>)> =
+        others.iter().take(MAX_GRIPS).filter_map(|&o| grips_of(o).map(|(shown, raw)| (o, shown, raw))).collect();
     for &(h, i) in hot.iter().take(MAX_GRIPS) {
-        let Some((from, raw)) = d.entity(h).and_then(|e| grip(e, i)) else { continue };
+        let found = others.iter().find(|(o, _, _)| *o == h).map(|(_, s, r)| (s.clone(), r.clone())).or_else(|| grips_of(h));
+        let Some((from, raw)) = found.and_then(|(s, r)| Some((*s.get(i)?, *r.get(i)?))) else { continue };
         add(h, i, raw + delta);
         let tol = 1e-9 * (1.0 + from.len());
-        for &o in others.iter().take(MAX_GRIPS) {
-            if o == h {
+        for (o, shown, raw) in &others {
+            if *o == h {
                 continue;
             }
-            let Some(e) = d.entity(o) else { continue };
-            if let Some(j) = crate::grips::grip_points(d, &e.kind).iter().position(|g| g.near(from, tol))
-                && let Some((_, raw)) = grip(e, j)
+            if let Some(j) = shown.iter().position(|g| g.near(from, tol))
+                && let Some(r) = raw.get(j)
             {
-                add(o, j, raw + delta);
+                add(*o, j, *r + delta);
             }
         }
     }

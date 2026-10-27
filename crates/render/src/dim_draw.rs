@@ -147,6 +147,19 @@ pub fn dimension_in(d: &Drawing, dm: &cadcraft_doc::Dimension) -> DimGeometry {
     dim::dimension_geometry_with(dm, &style, d.header.f64("DIMSCALE", 1.0), &dim_text(d, &st))
 }
 
+/// A dimension's measurement as its style formats it (units, precision, DIMLFAC; degrees for an
+/// angle), without DIMPOST, tolerances or the text that replaces it: the Measurement property.
+pub fn measurement_text(d: &Drawing, dm: &cadcraft_doc::Dimension) -> String {
+    let st = d.dim_style(&dm.style).cloned().unwrap_or_default().with_overrides(&dm.overrides);
+    let g = dimension_in(d, dm);
+    if matches!(dm.kind, cadcraft_doc::DimKind::Angular | cadcraft_doc::DimKind::Angular3P) {
+        let azin = (st.angular_zero_suppression & 3) * 4;
+        crate::units::format_angle_with_separator(g.measurement, st.angular_unit, st.angular_decimals, azin, &st.decimal_separator)
+    } else {
+        crate::format_linear_value(g.measurement, &st)
+    }
+}
+
 /// `lw` / `lt` are the dimension's own lineweight and linetype (ByBlock in DIMLWD, DIMLWE,
 /// DIMLTYPE, DIMLTEX1 and DIMLTEX2).
 pub(crate) fn dimension(
