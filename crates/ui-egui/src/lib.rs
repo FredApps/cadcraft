@@ -202,7 +202,7 @@ impl Default for UiState {
 pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
-    /// Pick a folder (the Custom Patterns folder); `None` where the host has no folder dialog.
+    /// Pick a folder (Options ▸ Fonts, the Custom Patterns folder); `None` where the host has no folder dialog.
     pub pick_folder: Option<Box<dyn Fn() -> Option<String>>>,
     /// Pick a `.lsp` file for APPLOAD, starting in the given folder (empty for the default one).
     /// `None` where there is no native file dialog: the desktop without one asks for the name,
