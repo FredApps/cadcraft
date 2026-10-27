@@ -67,6 +67,7 @@ mod lisp_corpus;
 mod malformed_handles;
 mod matchprop;
 mod measure_distance_snapping;
+mod measurement_property;
 mod metric_linetypes;
 mod mleader_arrows;
 mod mleader_content;
