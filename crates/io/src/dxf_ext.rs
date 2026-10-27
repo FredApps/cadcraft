@@ -36,7 +36,7 @@ pub(crate) fn formula_chunks(f: &str) -> Vec<String> {
     // bytes each, so the pieces are cut by bytes, between letters.
     let mut out = Vec::new();
     let mut cur = String::new();
-    for c in f.chars().take(4000) {
+    for c in f.chars() {
         if cur.len() + c.len_utf8() > 250 {
             out.push(std::mem::take(&mut cur));
         }
