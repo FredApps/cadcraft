@@ -167,3 +167,53 @@ fn a_cleared_formula_is_not_restored_from_old_xdata() {
         }
     }
 }
+
+/// A text with an AutoCAD field (its extension dictionary's ACAD_FIELD → TEXT → FIELD), as
+/// another program writes it: `field` is the field code.
+fn with_field(field: &str) -> String {
+    let mut d = Drawing::new_metric();
+    d.add(&Space::Model, Common::default(), EntityKind::Text(text("old", None))).unwrap();
+    // Group codes without their padding, one group a line.
+    let dxf = String::from_utf8(cadcraft_io::write(&d, "a.dxf").unwrap()).unwrap().lines().map(str::trim).collect::<Vec<_>>().join("\n");
+    let at = dxf.find("\n0\nTEXT\n5\n").unwrap() + "\n0\nTEXT\n5\n".len();
+    let end = at + dxf[at..].find('\n').unwrap();
+    let h = dxf[at..end].trim().to_string();
+    let mut out = format!("{}\n102\n{{ACAD_XDICTIONARY\n360\nFFF01\n102\n}}{}", &dxf[..end], &dxf[end..]);
+    let objects = out.find("\n2\nOBJECTS\n").unwrap();
+    let close = objects + out[objects..].find("\n0\nENDSEC").unwrap();
+    let objs = format!(
+        "\n0\nDICTIONARY\n5\nFFF01\n330\n{h}\n100\nAcDbDictionary\n280\n1\n3\nACAD_FIELD\n360\nFFF02\
+         \n0\nDICTIONARY\n5\nFFF02\n330\nFFF01\n100\nAcDbDictionary\n280\n1\n3\nTEXT\n360\nFFF03\
+         \n0\nFIELD\n5\nFFF03\n330\nFFF02\n100\nAcDbField\n1\nTEXT\n2\n{field}"
+    );
+    out.insert_str(close, &objs);
+    out
+}
+
+/// A text whose AutoCAD field is replaced by plain text drops the field when saved; one that
+/// keeps it writes it back (#2324 review).
+#[test]
+fn a_replaced_field_is_not_restored_on_reopen() {
+    let src = with_field("Date: %<\\AcVar Date \\f \"yyyy\">%");
+    let read = cadcraft_io::read(src.as_bytes(), "a.dxf").unwrap();
+    let t = read.model.iter().find_map(|e| if let EntityKind::Text(t) = &e.kind { Some((e.handle, t.clone())) } else { None }).unwrap();
+    assert!(t.1.formula.as_deref().is_some_and(|f| f.contains("%<\\AcVar")), "{:?}", t.1.formula);
+    // Kept: written back.
+    let again = cadcraft_io::read(&cadcraft_io::write(&read, "a.dxf").unwrap(), "a.dxf").unwrap();
+    assert!(again.model.iter().any(|e| matches!(&e.kind, EntityKind::Text(x) if x.formula.is_some())));
+    // Replaced: gone for good.
+    let mut edited = read;
+    edited
+        .modify_entity(t.0, |e| {
+            if let EntityKind::Text(x) = &mut e.kind {
+                x.value = "plain".into();
+                x.formula = None;
+            }
+        })
+        .unwrap();
+    let bytes = cadcraft_io::write(&edited, "a.dxf").unwrap();
+    assert!(!String::from_utf8_lossy(&bytes).contains("AcDbField"), "the field objects are not written");
+    let back = cadcraft_io::read(&bytes, "a.dxf").unwrap();
+    let t = back.model.iter().find_map(|e| if let EntityKind::Text(t) = &e.kind { Some(t.clone()) } else { None }).unwrap();
+    assert_eq!((t.value.as_str(), t.formula.as_deref()), ("plain", None));
+}
