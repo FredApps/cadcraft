@@ -567,19 +567,17 @@ impl P<'_> {
         Ok(a)
     }
     fn power(&mut self) -> R {
-        let a = self.unary()?;
-        if self.is_op(&["^"]).is_some() {
+        // Left to right, as in a spreadsheet: =2^3^2 is (2^3)^2 = 64. A loop, so a long chain
+        // takes no stack.
+        let mut a = self.unary()?;
+        while self.is_op(&["^"]).is_some() {
             self.i += 1;
-            // Each `^` of a chain nests one level deeper: counted like parentheses.
-            self.depth += 1;
-            if self.depth > MAX_DEPTH {
-                return Err(Err::Syntax);
-            }
-            let b = self.power();
-            self.depth -= 1;
-            let b = b?;
+            let b = self.unary()?;
             let v = a.num()?.powf(b.num()?);
-            return if v.is_finite() { Ok(Val::Num(v)) } else { Err(Err::Num) };
+            if !v.is_finite() {
+                return Err(Err::Num);
+            }
+            a = Val::Num(v);
         }
         Ok(a)
     }
@@ -878,9 +876,14 @@ mod tests {
     /// review); quoted text in a number format doesn't make it a date format.
     #[test]
     fn power_chains_are_bounded_and_quoted_words_are_not_dates() {
-        let chain = format!("={}2", "2^".repeat(5000));
-        assert_eq!(ev(&chain), "#ERROR!");
-        assert_eq!(ev("=2^3^2"), "512");
+        // Longer than any formula may be: refused.
+        assert_eq!(ev(&format!("={}2", "2^".repeat(5000))), "#ERROR!");
+        // A long chain is no deep nesting: worked out (here too big), no stack used up.
+        assert_eq!(ev(&format!("={}2", "2^".repeat(900))), "#NUM!");
+        assert_eq!(ev(&format!("={}1", "1^".repeat(900))), "1");
+        // Left to right, as in a spreadsheet.
+        assert_eq!(ev("=2^3^2"), "64");
+        assert_eq!(ev("=-2^2"), "4");
         assert!(!looks_like_date_format("0.0\" days\""));
         assert!(!looks_like_date_format("0 \"thick\""));
         assert!(looks_like_date_format("dd.mm.yyyy"));
