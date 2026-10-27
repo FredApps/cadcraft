@@ -54,15 +54,16 @@ pub fn scan(folder: &str) -> (Vec<Found>, Option<String>) {
     if dir.is_empty() {
         return (Vec::new(), None);
     }
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return (Vec::new(), Some(crate::tl!("This folder does not exist").to_string()));
+    let rd = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Vec::new(), Some(crate::tl!("This folder does not exist").to_string())),
+        // There but not readable (permissions, not a folder…): say why.
+        Err(e) => return (Vec::new(), Some(format!("{}: {e}", crate::tl!("The folder can't be read")))),
     };
     let mut files: Vec<std::path::PathBuf> = Vec::new();
     for entry in rd.take(MAX_FILES * 20) {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => return (Vec::new(), Some(format!("{}: {e}", crate::tl!("The folder can't be read")))),
-        };
+        // An entry that can't be read (removed meanwhile, no permission) is left out.
+        let Ok(entry) = entry else { continue };
         // `file_type` does not follow symbolic links: a link to a file elsewhere is not read.
         let path = entry.path();
         if entry.file_type().is_ok_and(|t| t.is_file()) && path.extension().is_some_and(|x| x.eq_ignore_ascii_case("pat")) {
@@ -73,7 +74,7 @@ pub fn scan(folder: &str) -> (Vec<Found>, Option<String>) {
     files.sort();
     files.truncate(MAX_FILES);
     let mut out = Vec::new();
-    for path in files {
+    'files: for path in files {
         if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(u64::MAX) > MAX_FILE_BYTES {
             continue;
         }
@@ -82,7 +83,7 @@ pub fn scan(folder: &str) -> (Vec<Found>, Option<String>) {
         let text = String::from_utf8_lossy(&bytes);
         for p in parse_pat(&text).items {
             if out.len() >= MAX_PATTERNS {
-                break;
+                break 'files;
             }
             out.push(Found { file: path.to_string_lossy().to_string(), name: p.name, description: p.description, lines: p.lines });
         }
@@ -223,6 +224,25 @@ mod tests {
             assert!(!found.iter().any(|f| f.name == "OUTSIDE"), "a link is skipped");
             let _ = std::fs::remove_file(outside);
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The pattern limit holds across files, and a path that is a file is not "missing".
+    #[test]
+    fn the_pattern_limit_counts_every_file() {
+        let dir = std::env::temp_dir().join(format!("cadcraft-many-pat-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in ["a", "b", "c"] {
+            let many: String = (0..2000).map(|i| format!("*{f}{i}, p\n0, 0,0, 0,1\n")).collect();
+            std::fs::write(dir.join(format!("{f}.pat")), &many).unwrap();
+        }
+        let (found, _) = super::scan(&dir.to_string_lossy());
+        assert_eq!(found.len(), super::MAX_PATTERNS);
+        assert!(!found.iter().any(|p| p.name.starts_with('C') && p.name[1..].parse::<usize>().is_ok_and(|n| n >= 1000)));
+        let (none, problem) = super::scan(&dir.join("a.pat").to_string_lossy());
+        assert!(none.is_empty());
+        let problem = problem.unwrap_or_default();
+        assert!(!problem.contains("does not exist"), "{problem}");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
