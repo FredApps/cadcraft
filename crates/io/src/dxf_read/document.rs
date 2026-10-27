@@ -144,13 +144,7 @@ pub(super) fn read_objects(tags: &[Tag], objs: &mut Objects, layout_objs: &mut V
             // from what CADCraft writes for a layout it created.
             let pt = |c: i32| Some(Vec2::new(t.f(c)?, t.f(c + 10)?)).filter(|p| p.x.is_finite() && p.y.is_finite());
             let limits = pt(10).zip(pt(11)).filter(|l| *l != (Vec2::ZERO, Vec2::new(12.0, 9.0)));
-            layout_objs.push((
-                t.s(1).unwrap_or_default(),
-                t.i(71).unwrap_or(0) as u32,
-                br.to_ascii_uppercase(),
-                page_setup(&plot),
-                limits,
-            ));
+            layout_objs.push((t.s(1).unwrap_or_default(), t.i(71).unwrap_or(0) as u32, br.to_ascii_uppercase(), page_setup(&plot), limits));
         }
     }
 }
