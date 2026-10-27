@@ -135,7 +135,11 @@ pub(crate) fn set_text(s: &mut Session, h: Handle, text: &str) -> Result<()> {
         EntityKind::Dimension(d) => f(&d.marks.formula).unwrap_or_else(|| d.text.clone()),
         _ => String::new(),
     };
-    let unchanged = shown == text || shown == text.replace('\n', "\\P");
+    // Multiline text comes back from the editor rewritten (its codes in the editor's own form):
+    // compared in that form, an edit that changed nothing keeps the formula.
+    let canonical = |x: &str| crate::mtext_edit::Formatted::from_contents(x).to_contents();
+    let multiline = matches!(k, EntityKind::MText(_) | EntityKind::MLeader(_));
+    let unchanged = shown == text || shown == text.replace('\n', "\\P") || (multiline && canonical(&shown) == canonical(&text.replace('\n', "\\P")));
     match &mut k {
         EntityKind::Text(t) => t.value = text.to_string(),
         EntityKind::AttDef(a) => a.text.value = text.to_string(),

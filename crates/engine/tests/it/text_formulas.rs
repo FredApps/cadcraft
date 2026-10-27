@@ -246,3 +246,19 @@ fn the_editor_shows_formulas_as_typed() {
         k => panic!("{k:?}"),
     }
 }
+
+/// Multiline text sent back by the editor in its own form of the codes, unchanged otherwise,
+/// keeps its formula (#2326 review).
+#[test]
+fn an_unchanged_multiline_formula_in_the_editors_form_is_kept() {
+    let mut s = Session::new();
+    let r = s.execute("mtext", &json!({ "at": [0, 10], "height": 1, "width": 20, "text": "=UPPER(\"\\{a\\}\")&\"\\\\x\"" })).unwrap();
+    let m = r["handle"].as_str().or_else(|| r["handles"][0].as_str()).unwrap().to_string();
+    let before = s.doc().unwrap().model.iter().find_map(|e| if let EntityKind::MText(t) = &e.kind { Some(t.clone()) } else { None }).unwrap();
+    assert!(before.formula.is_some());
+    let shown = cadcraft_doc::mtext_literal(before.formula.as_deref().unwrap());
+    let sent = cadcraft_engine::mtext_edit::Formatted::from_contents(&shown).to_contents();
+    s.execute("textedit", &json!({ "handle": m, "text": sent })).unwrap();
+    let after = s.doc().unwrap().model.iter().find_map(|e| if let EntityKind::MText(t) = &e.kind { Some(t.clone()) } else { None }).unwrap();
+    assert_eq!(after.formula, before.formula);
+}
