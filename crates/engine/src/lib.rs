@@ -49,7 +49,7 @@ pub use cadcraft_geom as geom;
 pub use cadcraft_render as render;
 pub use cmd::hatch::{HatchPicks, PatternChoice, PickMode, pattern_choices};
 pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
-pub use prompt::{Accept, Drag, Glow, Input, Interactive, Picker, Prompt, Step};
+pub use prompt::{Accept, Drag, Input, Interactive, Picker, Prompt, Step};
 
 mod doc_state;
 mod error;
@@ -64,6 +64,8 @@ pub use error::{EngineError, Result};
 pub use last_used::{LastUsed, LeaderOrder, LeaderType, MLeaderOptions};
 pub use running::{PendingWindow, Running};
 pub use settings::Settings;
+// What TRIM and EXTEND show glowing under the cursor.
+pub use prompt::Glow;
 pub use view::{ModelTile, ModelTiles, View};
 
 /// The editor session: open drawings, settings, the running command and the command log.
