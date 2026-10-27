@@ -1088,3 +1088,22 @@ fn user_arrowheads_follow_the_hatch_island_style() {
         assert!((area - want).abs() < 1e-6, "style {style}: {area}");
     }
 }
+
+/// A user arrowhead block too big to draw quickly gives way to the built-in arrowhead
+/// (#2329 review): the geometry is not worked out.
+#[test]
+fn a_huge_user_arrowhead_is_refused() {
+    use cadcraft_doc::{Block, Entity, EntityKind, Handle, LwPolyline};
+    use cadcraft_geom::PolyVertex;
+    let mut b = Block::new("HUGE");
+    let mut big = PolyVertex::new(Vec2::ZERO);
+    big.bulge = 0.5;
+    let vertices: Vec<PolyVertex> = (0..20_000).map(|i| PolyVertex { p: Vec2::new(i as f64 * 1e-3, 0.0), ..big }).collect();
+    b.entities.push(Entity::new(
+        Handle(1),
+        EntityKind::LwPolyline(LwPolyline { vertices, closed: false, const_width: 0.0, elevation: 0.0, plinegen: false }),
+    ));
+    let t = std::time::Instant::now();
+    assert!(crate::dim_draw::arrow_geometry(&b).is_none());
+    assert!(t.elapsed().as_secs() < 2);
+}
