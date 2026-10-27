@@ -464,7 +464,7 @@ mod tests {
     #[test]
     fn banded_inside_test_matches_the_plain_one() {
         let star: Vec<Vec2> = (0..40).map(|i| Vec2::from_angle(f64::from(i) * 0.157) * if i % 2 == 0 { 10.0 } else { 4.0 }).collect();
-        let inner: Vec<Vec2> = (0..12).map(|i| Vec2::from_angle(f64::from(i) * 0.5236) * 2.0).collect();
+        let inner: Vec<Vec2> = (0..12).map(|i| Vec2::from_angle(f64::from(i) * 0.5) * 2.0).collect();
         let edges: Vec<(Vec2, Vec2)> = edges_of(&star).into_iter().chain(edges_of(&inner)).collect();
         let rows = EdgeRows::new(edges);
         assert!(rows.rows.len() > 1);
