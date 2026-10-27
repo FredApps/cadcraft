@@ -51,6 +51,8 @@ fn text_and_mtext_formulas_roundtrip() {
 
 fn text(value: &str, formula: Option<&str>) -> Text {
     Text {
+        backwards: false,
+        upside_down: false,
         insert: Vec3::new(0.0, 0.0, 0.0),
         align_pt: None,
         height: 2.5,
@@ -67,6 +69,7 @@ fn text(value: &str, formula: Option<&str>) -> Text {
 
 fn mtext(contents: &str, formula: Option<&str>) -> MText {
     MText {
+        frame: false,
         formula: formula.map(str::to_string),
         insert: Vec3::new(0.0, 10.0, 0.0),
         height: 2.5,
