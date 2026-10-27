@@ -164,6 +164,8 @@ pub(super) fn attdef(tags: &[Tag], c: &Common) -> Attrib {
     if let Some(m) = &multiline {
         text.value.clone_from(&m.read_as);
     }
+    // The formula's xdata closes the record, after any embedded multiline text.
+    text.formula = crate::dxf_ext::formula(tags);
     Attrib {
         tag: own.s(2).unwrap_or_default(),
         text,
