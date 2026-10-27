@@ -1185,7 +1185,7 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
                 });
                 num(ui, "Text height", "height", len(tx.height), &mut set, &mut bad, &ids);
                 num(ui, "Defined width", "width", len(tx.width), &mut set, &mut bad, &ids);
-                num(ui, "Rotation", "rotation", real(tx.rotation.to_degrees()), &mut set, &mut bad, &ids);
+                num(ui, "Rotation", "rotation", real(angles.shown(tx.rotation).to_degrees()), &mut set, &mut bad, &ids);
                 prop_row(ui, "Justification", |ui| {
                     let cur = MTEXT_JUSTIFY.get(usize::from(tx.attach.clamp(1, 9) - 1)).map_or("Top left", |j| j.1);
                     if let Some(n) = pick_menu(ui, crate::i18n::t(cur), MTEXT_JUSTIFY.iter().map(|j| crate::i18n::t(j.1).to_string()))
@@ -1394,5 +1394,36 @@ mod tests {
             output.textures_delta.clear();
         }
         assert!(painted_blue, "a ByLayer entity on a blue layer needs a blue Properties swatch");
+    }
+
+    fn texts(shape: &Shape, out: &mut Vec<String>) {
+        match shape {
+            Shape::Text(t) => out.push(t.galley.text().to_string()),
+            Shape::Vec(shapes) => shapes.iter().for_each(|s| texts(s, out)),
+            _ => {}
+        }
+    }
+
+    /// A multiline text's rotation shows from ANGBASE in the ANGDIR sense, as it is typed back
+    /// (and as TEXT and INSERT rows show it): with ANGBASE 90°, a text along +X shows 270 or -90,
+    /// not 0, which would write 90° back (#2326 review).
+    #[test]
+    fn mtext_rotation_shows_as_the_drawing_measures_angles() {
+        let mut app = CadApp::new(Session::default(), Services::default());
+        app.run("setvar", json!({ "name": "ANGBASE", "value": 90 })).unwrap();
+        let m = app.run("mtext", json!({ "at": [0, 0], "height": 1, "width": 10, "text": "A" })).unwrap();
+        let h = m["handle"].as_str().map(str::to_string).or_else(|| m["handles"][0].as_str().map(str::to_string)).unwrap();
+        app.run("select", json!({ "handles": [h] })).unwrap();
+        let ctx = egui::Context::default();
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 1600.0))), ..Default::default() };
+        let mut all = Vec::new();
+        for _ in 0..2 {
+            app.logic(&ctx);
+            let mut output = ctx.run_ui(input.clone(), |ui| properties_section(&mut app, ui));
+            all.clear();
+            output.shapes.iter().for_each(|s| texts(&s.shape, &mut all));
+            output.textures_delta.clear();
+        }
+        assert!(all.iter().any(|t| t == "270.0000" || t == "-90.0000"), "{all:?}");
     }
 }

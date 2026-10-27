@@ -197,6 +197,14 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("properties.set", "nothing selected"));
     }
     let color = p.get("color").map(|c| parse_color(c).ok_or_else(|| bad("properties.set", "bad colour"))).transpose()?;
+    // A hatch background is a colour or none ("None", "" or null), as HATCH and HATCHEDIT take.
+    if let Some(v) = p.get("background")
+        && !v.is_null()
+        && !v.as_str().is_some_and(|t| t.trim().is_empty() || t.trim().eq_ignore_ascii_case("none"))
+        && parse_color(v).is_none()
+    {
+        return Err(bad("properties.set", "background must be a colour or None"));
+    }
     let transparency = p
         .get("transparency")
         .map(|v| parse_transparency(v).ok_or_else(|| bad("properties.set", "transparency must be ByLayer, ByBlock or a percentage from 0 to 90")))

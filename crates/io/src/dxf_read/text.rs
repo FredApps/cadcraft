@@ -106,9 +106,14 @@ pub(super) fn text_from(t: &T) -> Text {
         _ => VAlign::Baseline,
     };
     let align = if t.f(11).is_some() { Some(t.p(11)) } else { None };
-    // Text generation flags (71: 2 backwards, 4 upside down), from the text's own groups (an
-    // attribute's embedded multiline text, after 101, has a 71 of its own).
-    let generation = t.0.iter().take_while(|g| g.code != 101).find(|g| g.code == 71).map_or(0, |g| g.i64());
+    // Text generation flags (71: 2 backwards, 4 upside down), from the text's own groups: an
+    // attribute's own section (AcDbAttribute / AcDbAttributeDefinition: a multiline attribute's
+    // type is a 71 too) and its embedded multiline text (after 101) are not the text's.
+    let generation =
+        t.0.iter()
+            .take_while(|g| g.code != 101 && !(g.code == 100 && g.str().trim().starts_with("AcDbAttribute")))
+            .find(|g| g.code == 71)
+            .map_or(0, |g| g.i64());
     let mut text = Text {
         insert: t.p(10),
         align_pt: if h == HAlign::Left && v == VAlign::Baseline { None } else { align },
