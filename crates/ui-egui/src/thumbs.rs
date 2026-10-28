@@ -172,7 +172,7 @@ fn make(path: &str) -> Option<Vec<u8>> {
     if let Some(png) = embedded(path) {
         return Some(png);
     }
-    let f = cadcraft_engine::cmd::file::read_file(path).ok()?;
+    let f = cadcraft_engine::cmd::file::read_file(std::path::Path::new(path)).ok()?;
     let d = f.drawing();
     let space = cadcraft_engine::doc::Space::Model;
     let opts = cadcraft_render::Options { min_dash: 0.0, ..cadcraft_render::Options::default() };
