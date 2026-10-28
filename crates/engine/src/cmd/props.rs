@@ -309,23 +309,84 @@ struct KindProps<'a> {
     style_doc: Option<&'a cadcraft_doc::Drawing>,
 }
 
+/// The text style of text, multiline text, a multileader's text and an attribute definition.
+fn set_text_style(entity: &mut cadcraft_doc::Entity, st: &str) {
+    match &mut entity.kind {
+        EntityKind::Text(t) => t.style = st.to_string(),
+        EntityKind::MText(t) => t.style = st.to_string(),
+        EntityKind::MLeader(m) => {
+            if let Some(t) = &mut m.text {
+                t.style = st.to_string();
+            }
+        }
+        EntityKind::AttDef(a) => a.text.style = st.to_string(),
+        _ => {}
+    }
+}
+
+/// Set a single-line text's properties; whether a text was given.
+fn set_text_properties(t: &mut cadcraft_doc::Text, params: &Value, k: &KindProps<'_>) -> bool {
+    let num = |key: &str| params.get(key).and_then(Value::as_f64).filter(|value| value.is_finite());
+    let mut changed = false;
+    if let Some(v) = str_param(params, "text") {
+        t.value = v.to_string();
+        changed = true;
+    }
+    if let Some(x) = num("height").filter(|x| *x > 0.0) {
+        t.height = x;
+    }
+    if let Some(x) = num("rotation") {
+        t.rotation = x.to_radians();
+    }
+    if let Some(x) = num("widthFactor").filter(|x| *x > 0.0) {
+        t.width_factor = x;
+    }
+    if let Some(f) = params.get("backwards").and_then(Value::as_bool) {
+        t.backwards = f;
+    }
+    if let Some(f) = params.get("upsideDown").and_then(Value::as_bool) {
+        t.upside_down = f;
+    }
+    if let (Some((h, v)), Some(sd)) = (k.text_justify, k.style_doc) {
+        rejustify_text(sd, t, h, v);
+    }
+    // The position is the point the text is placed by: moving it moves the text.
+    if let Some(to) = params.get("position").and_then(point_value) {
+        let d = to - t.justify_point();
+        for q in std::iter::once(&mut t.insert).chain(t.align_pt.as_mut()) {
+            q.x += d.x;
+            q.y += d.y;
+        }
+    }
+    changed
+}
+
+/// Set a circle's centre and size (radius, diameter, circumference or area).
+fn set_circle_properties(c: &mut cadcraft_doc::Circle, params: &Value) {
+    let num = |key: &str| params.get(key).and_then(Value::as_f64).filter(|value| value.is_finite());
+    if let Some(v) = params.get("center") {
+        set_xy(&mut c.center, v);
+    }
+    if let Some(r) = num("radius").filter(|r| *r > 0.0) {
+        c.radius = r;
+    }
+    if let Some(dm) = num("diameter").filter(|r| *r > 0.0) {
+        c.radius = dm / 2.0;
+    }
+    if let Some(cf) = num("circumference").filter(|x| *x > 0.0) {
+        c.radius = cf / cadcraft_geom::TAU;
+    }
+    if let Some(a) = num("area").filter(|x| *x > 0.0) {
+        c.radius = (a / cadcraft_geom::PI).sqrt();
+    }
+}
+
 /// Set the kind's own properties; whether a text was given (a new value, worked out as typed).
 fn apply_kind_properties(entity: &mut cadcraft_doc::Entity, params: &Value, k: &KindProps<'_>) -> bool {
     let num = |key: &str| params.get(key).and_then(Value::as_f64).filter(|value| value.is_finite());
     let mut new_text = false;
-    // The text style of text, multiline text and a multileader's text.
     if let Some(st) = k.text_style {
-        match &mut entity.kind {
-            EntityKind::Text(t) => t.style.clone_from(st),
-            EntityKind::MText(t) => t.style.clone_from(st),
-            EntityKind::MLeader(m) => {
-                if let Some(t) = &mut m.text {
-                    t.style.clone_from(st);
-                }
-            }
-            EntityKind::AttDef(a) => a.text.style.clone_from(st),
-            _ => {}
-        }
+        set_text_style(entity, st);
     }
     match &mut entity.kind {
         EntityKind::Line(l) => {
@@ -347,23 +408,7 @@ fn apply_kind_properties(entity: &mut cadcraft_doc::Entity, params: &Value, k: &
                 }
             }
         }
-        EntityKind::Circle(c) => {
-            if let Some(v) = params.get("center") {
-                set_xy(&mut c.center, v);
-            }
-            if let Some(r) = num("radius").filter(|r| *r > 0.0) {
-                c.radius = r;
-            }
-            if let Some(dm) = num("diameter").filter(|r| *r > 0.0) {
-                c.radius = dm / 2.0;
-            }
-            if let Some(cf) = num("circumference").filter(|x| *x > 0.0) {
-                c.radius = cf / cadcraft_geom::TAU;
-            }
-            if let Some(a) = num("area").filter(|x| *x > 0.0) {
-                c.radius = (a / cadcraft_geom::PI).sqrt();
-            }
-        }
+        EntityKind::Circle(c) => set_circle_properties(c, params),
         EntityKind::Arc(a) => {
             if let Some(v) = params.get("center") {
                 set_xy(&mut a.center, v);
@@ -378,38 +423,7 @@ fn apply_kind_properties(entity: &mut cadcraft_doc::Entity, params: &Value, k: &
                 a.end = cadcraft_geom::norm_angle(x.to_radians());
             }
         }
-        EntityKind::Text(t) => {
-            if let Some(v) = str_param(params, "text") {
-                t.value = v.to_string();
-                new_text = true;
-            }
-            if let Some(x) = num("height").filter(|x| *x > 0.0) {
-                t.height = x;
-            }
-            if let Some(x) = num("rotation") {
-                t.rotation = x.to_radians();
-            }
-            if let Some(x) = num("widthFactor").filter(|x| *x > 0.0) {
-                t.width_factor = x;
-            }
-            if let Some(f) = params.get("backwards").and_then(Value::as_bool) {
-                t.backwards = f;
-            }
-            if let Some(f) = params.get("upsideDown").and_then(Value::as_bool) {
-                t.upside_down = f;
-            }
-            if let (Some((h, v)), Some(sd)) = (k.text_justify, k.style_doc) {
-                rejustify_text(sd, t, h, v);
-            }
-            // The position is the point the text is placed by: moving it moves the text.
-            if let Some(to) = params.get("position").and_then(point_value) {
-                let d = to - t.justify_point();
-                for q in std::iter::once(&mut t.insert).chain(t.align_pt.as_mut()) {
-                    q.x += d.x;
-                    q.y += d.y;
-                }
-            }
-        }
+        EntityKind::Text(t) => new_text = set_text_properties(t, params, k),
         EntityKind::MText(t) => {
             if let Some(v) = str_param(params, "text") {
                 t.contents = v.replace('\n', "\\P");
