@@ -389,7 +389,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                 let from = st.add_from.filter(|f| uids.contains(f)).unwrap_or(current_doc);
                 let from_name = titles.iter().find(|(u, _)| *u == from).map(|(_, n)| n.clone()).unwrap_or_default();
                 let shown = crate::i18n::widget(ui, &from_name, egui::TextStyle::Body);
-                egui::ComboBox::from_id_salt("cc_batch_from").selected_text(shown).width(220.0).show_ui(ui, |ui| {
+                craft_ui::ComboBox::from_id_salt("cc_batch_from").selected_text(shown).width(220.0).show_ui(ui, |ui| {
                     for (uid, title) in &titles {
                         let name = crate::i18n::widget(ui, title, egui::TextStyle::Body);
                         if ui.selectable_label(*uid == from, name).clicked() {
