@@ -307,6 +307,22 @@ fn replace(chars: &mut Vec<char>, st: &mut EditState, s: &str, max_chars: usize)
     true
 }
 
+/// What the box shows and takes: the characters' look, one line or several, the width
+/// available to the text, the size of text without a look and the most characters.
+struct Frame<'a> {
+    look: &'a dyn Fn(usize) -> Look,
+    single_line: bool,
+    inner_w: f32,
+    default_size: f32,
+    max_chars: usize,
+}
+
+impl Frame<'_> {
+    fn layout(&self, chars: &[char]) -> Layout {
+        layout(chars, self.look, (!self.single_line).then_some(self.inner_w), self.default_size)
+    }
+}
+
 /// Show the box: `width` wide, at least `min_rows` lines tall (one line: `single_line`), the
 /// characters looking as `look` says. Returns whether the text changed.
 #[allow(clippy::too_many_arguments)]
@@ -322,14 +338,13 @@ pub fn show(
     default_size: f32,
     max_chars: usize,
 ) -> Output {
-    let t = crate::theme::Tokens::get();
     let margin = 5.0;
     let mut chars: Vec<char> = text.chars().collect();
     let n0 = chars.len();
     st.cursor = st.cursor.min(n0);
     st.anchor = st.anchor.min(n0);
-    let inner_w = (width - 2.0 * margin).max(20.0);
-    let lay = layout(&chars, look, (!single_line).then_some(inner_w), default_size);
+    let frame = Frame { look, single_line, inner_w: (width - 2.0 * margin).max(20.0), default_size, max_chars };
+    let lay = frame.layout(&chars);
     let row_h = default_size * 1.45;
     let h = lay.height.max(row_h * min_rows.max(1) as f32) + 2.0 * margin;
     let (rect, _) = ui.allocate_exact_size(vec2(width, h), Sense::hover());
@@ -347,163 +362,202 @@ pub fn show(
             m.set_focus_lock_filter(id, egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: false })
         });
     }
-    // Box coordinates → screen.
-    let origin = |sx: f32| pos2(rect.left() + margin + sx, rect.top() + margin);
     let scroll = if single_line { st.scroll_x } else { 0.0 };
-    // Mouse: place the caret, drag to select, double-click a word.
-    let hit = |p: Pos2, lay: &Layout| -> usize {
-        let y = p.y - rect.top() - margin;
-        let li = lay.lines.iter().position(|l| y < l.top + l.height).unwrap_or(lay.lines.len().saturating_sub(1));
-        lay.index_at(li, p.x - rect.left() - margin + scroll)
-    };
-    let shift = ui.input(|i| i.modifiers.shift);
-    if let Some(p) = response.interact_pointer_pos() {
-        if response.double_clicked() {
-            let c = hit(p, &lay);
-            st.anchor = word_left(&chars, (c + 1).min(chars.len()));
-            st.cursor = word_right(&chars, st.anchor).min(chars.len());
-            while st.cursor > st.anchor && chars.get(st.cursor - 1).is_some_and(|c| !is_word(*c)) {
-                st.cursor -= 1;
-            }
-        } else if response.drag_started() || response.clicked() {
-            st.cursor = hit(p, &lay);
-            if !shift {
-                st.anchor = st.cursor;
-            }
-            st.preferred_x = None;
-        } else if response.dragged() {
-            st.cursor = hit(p, &lay);
-        }
-    }
-    let mut changed = false;
-    if focused {
-        let events = ui.input(|i| i.events.clone());
-        let before = text.clone();
-        let before_cursor = st.cursor;
-        let mut edited = false;
-        for ev in events {
-            // Laid out only for the keys that move by what is on screen (arrows, Home, End).
-            let lay = || layout(&chars, look, (!single_line).then_some(inner_w), default_size);
-            match ev {
-                Event::Ime(egui::ImeEvent::Preedit { text, .. }) => st.preedit = text,
-                Event::Text(s) | Event::Paste(s) | Event::Ime(egui::ImeEvent::Commit(s)) => {
-                    st.preedit.clear();
-                    // Line breaks (Windows' \r\n too) become spaces in a one-line box, before
-                    // other control characters are dropped.
-                    let s = s.replace("\r\n", "\n").replace('\r', "\n");
-                    let s = if single_line { s.replace('\n', " ") } else { s };
-                    let s: String = s.chars().filter(|c| !c.is_control() || *c == '\n').collect();
-                    edited |= replace(&mut chars, st, &s, max_chars);
-                }
-                Event::Copy | Event::Cut => {
-                    let (a, b) = st.range();
-                    if a < b {
-                        ui.ctx().copy_text(chars.get(a..b).unwrap_or_default().iter().collect());
-                        if matches!(ev, Event::Cut) {
-                            edited |= replace(&mut chars, st, "", max_chars);
-                        }
-                    }
-                }
-                Event::Key { key, pressed: true, modifiers, .. } => {
-                    let word = modifiers.command || modifiers.alt;
-                    let mut moved = None;
-                    match key {
-                        Key::ArrowLeft | Key::ArrowRight => {
-                            let lay = lay();
-                            let dir = if key == Key::ArrowLeft { -1.0 } else { 1.0 };
-                            let (a, b) = st.range();
-                            moved = Some(if word {
-                                // A word in reading order: right is forward in left-to-right text.
-                                let li = lay.line_of(st.cursor);
-                                let rtl = lay.lines.get(li).is_some_and(|l| l.rtl);
-                                if (dir > 0.0) != rtl { word_right(&chars, st.cursor) } else { word_left(&chars, st.cursor) }
-                            } else if a != b && !modifiers.shift {
-                                // Collapse the selection at its left or right end on screen.
-                                let (xa, xb) = (lay.caret_x(a).1, lay.caret_x(b).1);
-                                if (xa < xb) == (dir < 0.0) { a } else { b }
-                            } else {
-                                lay.step(st.cursor, dir)
-                            });
-                            st.preferred_x = None;
-                        }
-                        Key::ArrowUp | Key::ArrowDown => {
-                            let lay = lay();
-                            let (li, x) = lay.caret_x(st.cursor);
-                            let px = *st.preferred_x.get_or_insert(x);
-                            let to = if key == Key::ArrowUp { li.checked_sub(1) } else { Some(li + 1).filter(|n| *n < lay.lines.len()) };
-                            moved = Some(match to {
-                                Some(n) => lay.index_at(n, px),
-                                None if key == Key::ArrowUp => 0,
-                                None => chars.len(),
-                            });
-                        }
-                        Key::Home => {
-                            let lay = lay();
-                            moved = Some(if modifiers.command { 0 } else { lay.lines.get(lay.line_of(st.cursor)).map_or(0, |l| l.start) });
-                            st.preferred_x = None;
-                        }
-                        Key::End => {
-                            let lay = lay();
-                            moved = Some(if modifiers.command { chars.len() } else { lay.lines.get(lay.line_of(st.cursor)).map_or(0, |l| l.end) });
-                            st.preferred_x = None;
-                        }
-                        Key::Backspace => {
-                            if st.cursor == st.anchor && st.cursor > 0 {
-                                st.anchor = if word { word_left(&chars, st.cursor) } else { st.cursor - 1 };
-                            }
-                            edited |= replace(&mut chars, st, "", max_chars);
-                        }
-                        Key::Delete => {
-                            if st.cursor == st.anchor && st.cursor < chars.len() {
-                                st.anchor = if word { word_right(&chars, st.cursor) } else { st.cursor + 1 };
-                            }
-                            edited |= replace(&mut chars, st, "", max_chars);
-                        }
-                        Key::Enter if !single_line && !modifiers.command => {
-                            edited |= replace(&mut chars, st, "\n", max_chars);
-                        }
-                        Key::A if modifiers.command => {
-                            st.anchor = 0;
-                            st.cursor = chars.len();
-                        }
-                        Key::Z | Key::Y if modifiers.command => {
-                            let redo = key == Key::Y || modifiers.shift;
-                            let (from, to) = if redo { (&mut st.redo, &mut st.undo) } else { (&mut st.undo, &mut st.redo) };
-                            if let Some((prev, c)) = from.pop() {
-                                to.push((chars.iter().collect(), st.cursor));
-                                chars = prev.chars().collect();
-                                st.cursor = c.min(chars.len());
-                                st.anchor = st.cursor;
-                                changed = true;
-                            }
-                        }
-                        _ => {}
-                    }
-                    if let Some(c) = moved {
-                        st.cursor = c.min(chars.len());
-                        if !modifiers.shift {
-                            st.anchor = st.cursor;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        if edited {
-            st.undo.push((before, before_cursor));
-            if st.undo.len() > MAX_UNDO {
-                st.undo.remove(0);
-            }
-            st.redo.clear();
-            st.preferred_x = None;
-            changed = true;
-        }
-    }
+    pointer(ui, &response, st, &chars, &lay, rect.min + vec2(margin - scroll, margin));
+    let changed = focused && edit(ui, &mut chars, st, &frame);
     if changed {
         *text = chars.iter().collect();
     }
-    // Paint: the box, the selection, the characters, the caret.
-    let lay = layout(&chars, look, (!single_line).then_some(inner_w), default_size);
+    let caret = paint(ui, Painted { id, rect, margin, row_h, focused, response: &response }, &chars, st, &frame);
+    Output { response, changed, caret }
+}
+
+/// Mouse: place the caret, drag to select, double-click a word. `origin`: the text's top-left
+/// on screen.
+fn pointer(ui: &egui::Ui, response: &egui::Response, st: &mut EditState, chars: &[char], lay: &Layout, origin: Pos2) {
+    let hit = |p: Pos2| -> usize {
+        let y = p.y - origin.y;
+        let li = lay.lines.iter().position(|l| y < l.top + l.height).unwrap_or(lay.lines.len().saturating_sub(1));
+        lay.index_at(li, p.x - origin.x)
+    };
+    let shift = ui.input(|i| i.modifiers.shift);
+    let Some(p) = response.interact_pointer_pos() else { return };
+    if response.double_clicked() {
+        let c = hit(p);
+        st.anchor = word_left(chars, (c + 1).min(chars.len()));
+        st.cursor = word_right(chars, st.anchor).min(chars.len());
+        while st.cursor > st.anchor && chars.get(st.cursor - 1).is_some_and(|c| !is_word(*c)) {
+            st.cursor -= 1;
+        }
+    } else if response.drag_started() || response.clicked() {
+        st.cursor = hit(p);
+        if !shift {
+            st.anchor = st.cursor;
+        }
+        st.preferred_x = None;
+    } else if response.dragged() {
+        st.cursor = hit(p);
+    }
+}
+
+/// This frame's typing, pasting and keys; whether the text changed.
+fn edit(ui: &egui::Ui, chars: &mut Vec<char>, st: &mut EditState, frame: &Frame<'_>) -> bool {
+    let events = ui.input(|i| i.events.clone());
+    let before: String = chars.iter().collect();
+    let before_cursor = st.cursor;
+    let mut edited = false;
+    let mut changed = false;
+    for ev in events {
+        match ev {
+            Event::Ime(egui::ImeEvent::Preedit { text, .. }) => st.preedit = text,
+            Event::Text(s) | Event::Paste(s) | Event::Ime(egui::ImeEvent::Commit(s)) => {
+                st.preedit.clear();
+                // Line breaks (Windows' \r\n too) become spaces in a one-line box, before
+                // other control characters are dropped.
+                let s = s.replace("\r\n", "\n").replace('\r', "\n");
+                let s = if frame.single_line { s.replace('\n', " ") } else { s };
+                let s: String = s.chars().filter(|c| !c.is_control() || *c == '\n').collect();
+                edited |= replace(chars, st, &s, frame.max_chars);
+            }
+            Event::Copy | Event::Cut => {
+                let (a, b) = st.range();
+                if a < b {
+                    ui.ctx().copy_text(chars.get(a..b).unwrap_or_default().iter().collect());
+                    if matches!(ev, Event::Cut) {
+                        edited |= replace(chars, st, "", frame.max_chars);
+                    }
+                }
+            }
+            Event::Key { key: k, pressed: true, modifiers, .. } => {
+                let (e, c) = key(chars, st, k, modifiers, frame);
+                edited |= e;
+                changed |= c;
+            }
+            _ => {}
+        }
+    }
+    if edited {
+        st.undo.push((before, before_cursor));
+        if st.undo.len() > MAX_UNDO {
+            st.undo.remove(0);
+        }
+        st.redo.clear();
+        st.preferred_x = None;
+        changed = true;
+    }
+    changed
+}
+
+/// One key: (the text was edited, the text changed by undo or redo).
+fn key(chars: &mut Vec<char>, st: &mut EditState, key: Key, modifiers: egui::Modifiers, frame: &Frame<'_>) -> (bool, bool) {
+    let word = modifiers.command || modifiers.alt;
+    let max_chars = frame.max_chars;
+    // Laid out only for the keys that move by what is on screen (arrows, Home, End).
+    let lay = |chars: &[char]| frame.layout(chars);
+    let mut moved = None;
+    let mut edited = false;
+    let mut changed = false;
+    match key {
+        Key::ArrowLeft | Key::ArrowRight => {
+            let lay = lay(chars);
+            let dir = if key == Key::ArrowLeft { -1.0 } else { 1.0 };
+            let (a, b) = st.range();
+            moved = Some(if word {
+                // A word in reading order: right is forward in left-to-right text.
+                let li = lay.line_of(st.cursor);
+                let rtl = lay.lines.get(li).is_some_and(|l| l.rtl);
+                if (dir > 0.0) != rtl { word_right(chars, st.cursor) } else { word_left(chars, st.cursor) }
+            } else if a != b && !modifiers.shift {
+                // Collapse the selection at its left or right end on screen.
+                let (xa, xb) = (lay.caret_x(a).1, lay.caret_x(b).1);
+                if (xa < xb) == (dir < 0.0) { a } else { b }
+            } else {
+                lay.step(st.cursor, dir)
+            });
+            st.preferred_x = None;
+        }
+        Key::ArrowUp | Key::ArrowDown => {
+            let lay = lay(chars);
+            let (li, x) = lay.caret_x(st.cursor);
+            let px = *st.preferred_x.get_or_insert(x);
+            let to = if key == Key::ArrowUp { li.checked_sub(1) } else { Some(li + 1).filter(|n| *n < lay.lines.len()) };
+            moved = Some(match to {
+                Some(n) => lay.index_at(n, px),
+                None if key == Key::ArrowUp => 0,
+                None => chars.len(),
+            });
+        }
+        Key::Home => {
+            let lay = lay(chars);
+            moved = Some(if modifiers.command { 0 } else { lay.lines.get(lay.line_of(st.cursor)).map_or(0, |l| l.start) });
+            st.preferred_x = None;
+        }
+        Key::End => {
+            let lay = lay(chars);
+            moved = Some(if modifiers.command { chars.len() } else { lay.lines.get(lay.line_of(st.cursor)).map_or(0, |l| l.end) });
+            st.preferred_x = None;
+        }
+        Key::Backspace => {
+            if st.cursor == st.anchor && st.cursor > 0 {
+                st.anchor = if word { word_left(chars, st.cursor) } else { st.cursor - 1 };
+            }
+            edited |= replace(chars, st, "", max_chars);
+        }
+        Key::Delete => {
+            if st.cursor == st.anchor && st.cursor < chars.len() {
+                st.anchor = if word { word_right(chars, st.cursor) } else { st.cursor + 1 };
+            }
+            edited |= replace(chars, st, "", max_chars);
+        }
+        Key::Enter if !frame.single_line && !modifiers.command => {
+            edited |= replace(chars, st, "\n", max_chars);
+        }
+        Key::A if modifiers.command => {
+            st.anchor = 0;
+            st.cursor = chars.len();
+        }
+        Key::Z | Key::Y if modifiers.command => {
+            let redo = key == Key::Y || modifiers.shift;
+            let (from, to) = if redo { (&mut st.redo, &mut st.undo) } else { (&mut st.undo, &mut st.redo) };
+            if let Some((prev, c)) = from.pop() {
+                to.push((chars.iter().collect(), st.cursor));
+                *chars = prev.chars().collect();
+                st.cursor = c.min(chars.len());
+                st.anchor = st.cursor;
+                changed = true;
+            }
+        }
+        _ => {}
+    }
+    if let Some(c) = moved {
+        st.cursor = c.min(chars.len());
+        if !modifiers.shift {
+            st.anchor = st.cursor;
+        }
+    }
+    (edited, changed)
+}
+
+/// Where and how the box is painted.
+struct Painted<'a> {
+    id: egui::Id,
+    rect: Rect,
+    margin: f32,
+    row_h: f32,
+    focused: bool,
+    response: &'a egui::Response,
+}
+
+/// Paint the box, the selection, the characters and the caret (and hand the caret to the IME);
+/// the caret's bottom on screen.
+fn paint(ui: &egui::Ui, b: Painted<'_>, chars: &[char], st: &mut EditState, frame: &Frame<'_>) -> Pos2 {
+    let Painted { id, rect, margin, row_h, focused, response } = b;
+    let t = crate::theme::Tokens::get();
+    let look = frame.look;
+    let single_line = frame.single_line;
+    let inner_w = frame.inner_w;
+    let origin = |sx: f32| pos2(rect.left() + margin + sx, rect.top() + margin);
+    let lay = frame.layout(chars);
     let p = ui.painter_at(rect);
     p.rect_filled(rect, 2.0, t.field);
     p.rect_stroke(rect, 2.0, Stroke::new(if focused { 1.5 } else { 1.0 }, if focused { t.accent } else { t.border }), egui::StrokeKind::Inside);
@@ -581,7 +635,7 @@ pub fn show(
         }
         ui.ctx().output_mut(|o| o.ime = Some(egui::output::IMEOutput::new(id, generation, egui::IMEPurpose::Normal, rect, caret_rect)));
     }
-    Output { response, changed, caret: caret_bottom }
+    caret_bottom
 }
 
 #[cfg(test)]
