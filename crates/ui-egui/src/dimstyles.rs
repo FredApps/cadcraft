@@ -421,7 +421,7 @@ fn combo_named<T: PartialEq + Clone>(
 ) -> Option<T> {
     let shown = items.iter().find(|(v, _)| v == current).map_or_else(String::new, |(_, l)| l.clone());
     let mut picked = None;
-    let response = egui::ComboBox::from_id_salt(id)
+    let response = craft_ui::ComboBox::from_id_salt(id)
         .width((ui.available_width() - 14.0).clamp(80.0, 190.0))
         .selected_text(crate::i18n::widget(ui, &shown, egui::TextStyle::Button))
         .height(320.0)
@@ -472,7 +472,7 @@ pub fn arrow_combo(ui: &mut egui::Ui, id: egui::Id, names: &Names, cur: &str) ->
         ui.spacing_mut().item_spacing.x = 4.0;
         let (r, _) = ui.allocate_exact_size(vec2(34.0, 18.0), egui::Sense::hover());
         paint_arrow(ui.painter(), r, names, &current);
-        egui::ComboBox::from_id_salt(id)
+        craft_ui::ComboBox::from_id_salt(id)
             .width((ui.available_width() - 14.0).clamp(80.0, 170.0))
             .selected_text(crate::i18n::widget(ui, &shown, egui::TextStyle::Button))
             .height(360.0)
@@ -590,6 +590,85 @@ fn split_post(post: &str, placeholder: &str) -> (String, String) {
     }
 }
 
+/// The colour control of a setting.
+fn color_row(ui: &mut egui::Ui, id: egui::Id, m: &mut Map<String, Value>, f: &str) {
+    let cur = m.get(f).cloned().unwrap_or(Value::Null);
+    let mut items: Vec<(Value, String)> =
+        vec![(json!({ "kind": "byBlock" }), crate::tl!("ByBlock").to_string()), (json!({ "kind": "byLayer" }), crate::tl!("ByLayer").to_string())];
+    for (aci, name) in [(1, "Red"), (2, "Yellow"), (3, "Green"), (4, "Cyan"), (5, "Blue"), (6, "Magenta"), (7, "White")] {
+        items.push((serde_json::to_value(cadcraft_color::Color::Index(aci)).unwrap_or(Value::Null), crate::i18n::t(name).to_string()));
+    }
+    if !items.iter().any(|(v, _)| *v == cur) {
+        items.push((cur.clone(), color_label(&cur)));
+    }
+    if let Some(v) = combo(ui, id.with(f), &cur, &items) {
+        m.insert(f.into(), v);
+    }
+}
+
+/// The arrowhead control of a setting.
+fn arrow_row(ui: &mut egui::Ui, id: egui::Id, names: &Names, m: &mut Map<String, Value>, f: &str) {
+    let mut cur = text(m, f);
+    // An empty per-end arrowhead uses DIMBLK.
+    if cur.is_empty() && f != "leaderArrowBlock" {
+        cur = text(m, "arrowBlock");
+    }
+    let shown = shown_arrow(names, &cur);
+    let shown = shown.as_str();
+    if let Some(v) = arrow_combo(ui, id.with(f), names, &cur) {
+        // The first arrowhead sets the second too while they match, as AutoCAD's does.
+        let mut picked = vec![f];
+        if f == "arrowBlock1" {
+            let second = text(m, "arrowBlock2");
+            let second = if second.is_empty() { text(m, "arrowBlock") } else { second };
+            if second.eq_ignore_ascii_case(shown) || (builtin_arrow(&second) && builtin_arrow(shown) && same_arrow(&second, shown)) {
+                m.insert("arrowBlock2".into(), json!(v));
+                picked.push("arrowBlock2");
+            }
+            m.insert("arrowBlock".into(), json!(v));
+        }
+        m.insert(f.into(), json!(v));
+        if f != "leaderArrowBlock" {
+            separate_closed_filled(m, &picked);
+        }
+    }
+}
+
+/// The linetype control of a setting.
+fn linetype_row(ui: &mut egui::Ui, id: egui::Id, names: &Names, m: &mut Map<String, Value>, f: &str) {
+    let mut items: Vec<(String, String)> = vec![(String::new(), crate::tl!("ByBlock").into()), ("ByLayer".into(), crate::tl!("ByLayer").into())];
+    for n in &names.linetypes {
+        if !["ByLayer", "ByBlock"].iter().any(|x| x.eq_ignore_ascii_case(n)) {
+            items.push((n.clone(), n.clone()));
+        }
+    }
+    let cur = text(m, f);
+    let cur = items.iter().find(|(v, _)| v.eq_ignore_ascii_case(&cur)).map_or(cur, |(v, _)| v.clone());
+    if let Some(v) = combo(ui, id.with(f), &cur, &items) {
+        m.insert(f.into(), json!(v));
+    }
+}
+
+/// The textstyle control of a setting.
+fn text_style_row(ui: &mut egui::Ui, id: egui::Id, names: &Names, m: &mut Map<String, Value>, f: &str) {
+    let items: Vec<(String, String)> = names.text_styles.iter().map(|n| (n.clone(), n.clone())).collect();
+    let cur = text(m, f);
+    let cur = items.iter().find(|(v, _)| v.eq_ignore_ascii_case(&cur)).map_or(cur, |(v, _)| v.clone());
+    if let Some(v) = combo(ui, id.with(f), &cur, &items) {
+        m.insert(f.into(), json!(v));
+    }
+}
+
+/// The lineweight control of a setting.
+fn lineweight_row(ui: &mut egui::Ui, id: egui::Id, m: &mut Map<String, Value>, f: &str) {
+    let mut items: Vec<(i64, String)> =
+        vec![(-2, crate::tl!("ByBlock").into()), (-1, crate::tl!("ByLayer").into()), (-3, crate::tl!("Default").into())];
+    items.extend(cadcraft_doc::Lineweight::STANDARD.iter().map(|v| (i64::from(*v), format!("{:.2} mm", f64::from(*v) / 100.0))));
+    if let Some(v) = combo(ui, id.with(f), &int(m, f), &items) {
+        m.insert(f.into(), json!(v));
+    }
+}
+
 /// One setting's control; true when it changed `m`.
 pub fn field_row(ui: &mut egui::Ui, id: egui::Id, names: &Names, m: &mut Map<String, Value>, kind: Kind) -> bool {
     let before = m.clone();
@@ -625,78 +704,11 @@ pub fn field_row(ui: &mut egui::Ui, id: egui::Id, names: &Names, m: &mut Map<Str
                 m.insert(f.into(), json!(if b { v | bit } else { v & !bit }));
             }
         }
-        Kind::Color(f) => {
-            let cur = m.get(f).cloned().unwrap_or(Value::Null);
-            let mut items: Vec<(Value, String)> = vec![
-                (json!({ "kind": "byBlock" }), crate::tl!("ByBlock").to_string()),
-                (json!({ "kind": "byLayer" }), crate::tl!("ByLayer").to_string()),
-            ];
-            for (aci, name) in [(1, "Red"), (2, "Yellow"), (3, "Green"), (4, "Cyan"), (5, "Blue"), (6, "Magenta"), (7, "White")] {
-                items.push((serde_json::to_value(cadcraft_color::Color::Index(aci)).unwrap_or(Value::Null), crate::i18n::t(name).to_string()));
-            }
-            if !items.iter().any(|(v, _)| *v == cur) {
-                items.push((cur.clone(), color_label(&cur)));
-            }
-            if let Some(v) = combo(ui, id.with(f), &cur, &items) {
-                m.insert(f.into(), v);
-            }
-        }
-        Kind::Arrow(f) => {
-            let mut cur = text(m, f);
-            // An empty per-end arrowhead uses DIMBLK.
-            if cur.is_empty() && f != "leaderArrowBlock" {
-                cur = text(m, "arrowBlock");
-            }
-            let shown = shown_arrow(names, &cur);
-            let shown = shown.as_str();
-            if let Some(v) = arrow_combo(ui, id.with(f), names, &cur) {
-                // The first arrowhead sets the second too while they match, as AutoCAD's does.
-                let mut picked = vec![f];
-                if f == "arrowBlock1" {
-                    let second = text(m, "arrowBlock2");
-                    let second = if second.is_empty() { text(m, "arrowBlock") } else { second };
-                    if second.eq_ignore_ascii_case(shown) || (builtin_arrow(&second) && builtin_arrow(shown) && same_arrow(&second, shown)) {
-                        m.insert("arrowBlock2".into(), json!(v));
-                        picked.push("arrowBlock2");
-                    }
-                    m.insert("arrowBlock".into(), json!(v));
-                }
-                m.insert(f.into(), json!(v));
-                if f != "leaderArrowBlock" {
-                    separate_closed_filled(m, &picked);
-                }
-            }
-        }
-        Kind::Lineweight(f) => {
-            let mut items: Vec<(i64, String)> =
-                vec![(-2, crate::tl!("ByBlock").into()), (-1, crate::tl!("ByLayer").into()), (-3, crate::tl!("Default").into())];
-            items.extend(cadcraft_doc::Lineweight::STANDARD.iter().map(|v| (i64::from(*v), format!("{:.2} mm", f64::from(*v) / 100.0))));
-            if let Some(v) = combo(ui, id.with(f), &int(m, f), &items) {
-                m.insert(f.into(), json!(v));
-            }
-        }
-        Kind::Linetype(f) => {
-            let mut items: Vec<(String, String)> =
-                vec![(String::new(), crate::tl!("ByBlock").into()), ("ByLayer".into(), crate::tl!("ByLayer").into())];
-            for n in &names.linetypes {
-                if !["ByLayer", "ByBlock"].iter().any(|x| x.eq_ignore_ascii_case(n)) {
-                    items.push((n.clone(), n.clone()));
-                }
-            }
-            let cur = text(m, f);
-            let cur = items.iter().find(|(v, _)| v.eq_ignore_ascii_case(&cur)).map_or(cur, |(v, _)| v.clone());
-            if let Some(v) = combo(ui, id.with(f), &cur, &items) {
-                m.insert(f.into(), json!(v));
-            }
-        }
-        Kind::TextStyle(f) => {
-            let items: Vec<(String, String)> = names.text_styles.iter().map(|n| (n.clone(), n.clone())).collect();
-            let cur = text(m, f);
-            let cur = items.iter().find(|(v, _)| v.eq_ignore_ascii_case(&cur)).map_or(cur, |(v, _)| v.clone());
-            if let Some(v) = combo(ui, id.with(f), &cur, &items) {
-                m.insert(f.into(), json!(v));
-            }
-        }
+        Kind::Color(f) => color_row(ui, id, m, f),
+        Kind::Arrow(f) => arrow_row(ui, id, names, m, f),
+        Kind::Lineweight(f) => lineweight_row(ui, id, m, f),
+        Kind::Linetype(f) => linetype_row(ui, id, names, m, f),
+        Kind::TextStyle(f) => text_style_row(ui, id, names, m, f),
         Kind::Prefix(f, ph) | Kind::Suffix(f, ph) => {
             let (mut pre, mut suf) = split_post(&text(m, f), ph);
             let prefix = matches!(kind, Kind::Prefix(..));
