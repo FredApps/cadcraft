@@ -74,6 +74,20 @@ fn poly_grip(p: &LwPolyline, index: usize) -> Option<PolyGrip> {
     None
 }
 
+/// The further parts of a broken table move on their own: grip `index` (after the first) of a
+/// broken table moves its part by `delta`. Whether it was one.
+fn move_table_part(k: &mut EntityKind, index: usize, delta: Vec2) -> bool {
+    let (Some(i), EntityKind::Table(t)) = (index.checked_sub(1), k) else { return false };
+    let Some(b) = &mut t.breaks else { return false };
+    if b.offsets.len() <= i {
+        b.offsets.resize(i + 1, Vec2::ZERO);
+    }
+    if let Some(o) = b.offsets.get_mut(i) {
+        *o += delta;
+    }
+    true
+}
+
 /// The shape after dragging grip `index` to `to` (STRETCH mode). `None` when the grip does not
 /// exist or the result would be degenerate.
 pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityKind> {
@@ -84,18 +98,7 @@ pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityK
     let from = *grips.get(index)?;
     let delta = to - from;
     let mut k = kind.clone();
-    // The further parts of a broken table move on their own.
-    if index > 0
-        && let EntityKind::Table(t) = &mut k
-        && let Some(b) = &mut t.breaks
-    {
-        let i = index - 1;
-        if b.offsets.len() <= i {
-            b.offsets.resize(i + 1, Vec2::ZERO);
-        }
-        if let Some(o) = b.offsets.get_mut(i) {
-            *o += delta;
-        }
+    if move_table_part(&mut k, index, delta) {
         return Some(k);
     }
     match &mut k {
