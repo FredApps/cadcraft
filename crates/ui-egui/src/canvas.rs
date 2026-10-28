@@ -27,8 +27,8 @@ use cursor::{draw_crosshair, draw_snap_marker, draw_tracking, effective_point, o
 use cycle::{CycleList, cycle_badge, cycle_click, cycle_list, over_canvas_menu, shift_space_cycle};
 pub(crate) use draw::{Look, draw_highlight, draw_list};
 use draw::{draw_drag_gpu, draw_highlight_gpu, draw_list_gpu, list_mesh_key, selection_area_fill};
-use dyn_boxes::{dynamic_input, echo_box};
 pub(crate) use dyn_boxes::length_units;
+use dyn_boxes::{dynamic_input, echo_box};
 use grid::draw_grid;
 use grips::{click_grip, grip_at, grip_menu, grip_options, grip_rect, grip_snap, hover_grip_menu};
 use list::{PrimIndex, ensure_list, rebuilt_preview};
