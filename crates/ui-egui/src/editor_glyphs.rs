@@ -115,6 +115,7 @@ pub fn advance(f: &EditorFont, italic: bool, c: char, size: f32) -> f32 {
 }
 
 /// Draw `c` in `f` with its baseline-left at `at` (screen), at egui font size `size`.
+#[allow(clippy::too_many_arguments)]
 pub fn paint(painter: &egui::Painter, f: &EditorFont, italic: bool, bold: bool, c: char, at: Pos2, size: f32, color: Color32) {
     if c.is_whitespace() || c.is_control() {
         return;
