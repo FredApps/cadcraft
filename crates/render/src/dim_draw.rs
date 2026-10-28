@@ -1,8 +1,10 @@
+use super::dim::ArrowGeom;
 use super::display::Kind;
 use super::draw::stroke_with;
 use super::props::default_lineweight;
 use super::text_entity::{layout_mtext_entity, place_text_entity, text_style};
-use super::{Builder, Color, Ctx, DimGeometry, DimText, Drawing, Entity, EntityKind, LineRole, Lineweight, Vec2, dim, ink};
+use super::{Builder, Color, Ctx, DimGeometry, DimText, Drawing, Entity, EntityKind, LineRole, Lineweight, Vec2, dim, fill, ink};
+use cadcraft_geom::Bounds2;
 
 /// The font settings of a dimension style's text style.
 pub fn dim_text(d: &Drawing, st: &cadcraft_doc::DimStyle) -> DimText {
