@@ -31,8 +31,8 @@ pub mod hatchdlg;
 mod mtext_editor;
 mod panel_state;
 pub mod spacemouse;
-pub mod thumbs;
 pub mod switch;
+pub mod thumbs;
 // The External References palette.
 pub mod xrefs;
 

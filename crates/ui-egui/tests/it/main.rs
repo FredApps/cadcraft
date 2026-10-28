@@ -1,6 +1,6 @@
 mod animation_effects;
-mod block_manager;
 mod block_description_palette;
+mod block_manager;
 mod chrome_geometry;
 mod context_menu;
 mod context_menus;
