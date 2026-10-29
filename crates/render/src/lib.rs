@@ -234,7 +234,7 @@ impl Builder<'_> {
                 while text.next_if(|t| t.outline < i).is_some() {}
                 let glyph = text.next_if(|t| t.outline == i);
                 if let (Some(t), Some(v)) = (glyph, view)
-                    && !crate::text::may_show(crate::text::placement(t, ctx.xf), &v)
+                    && !crate::text::may_show(crate::text::placement(t, ctx.xf), cadcraft_fonts::ttf::glyph_bounds(&t.face, t.gid), &v)
                 {
                     continue;
                 }

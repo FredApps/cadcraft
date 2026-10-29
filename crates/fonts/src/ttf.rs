@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, RwLock};
 
-use cadcraft_geom::Vec2;
+use cadcraft_geom::{Bounds2, Vec2};
 use skrifa::instance::{LocationRef, Size};
 use skrifa::outline::{DrawSettings, OutlinePen};
 use skrifa::raw::FileRef;
@@ -707,6 +707,8 @@ fn fallback_shared(c: char) -> Option<Face> {
 pub(crate) struct GlyphOutline {
     pub(crate) contours: Arc<[Vec<Vec2>]>,
     points: usize,
+    /// The extent of `contours`, found once as the outline is built (empty when it has none).
+    bounds: Bounds2,
     pub(crate) advance: f64,
     pub(crate) cap: f64,
     /// The font maps the character (false: the missing-glyph shape).
@@ -858,6 +860,12 @@ pub fn glyph_contours(face: &Face, gid: u16) -> Arc<[Vec<Vec2>]> {
     glyph_by_id(face, u32::from(gid)).contours.clone()
 }
 
+/// The extent of [`glyph_contours`] in the same font units (empty for a glyph without ink), so
+/// renderers can test a placement against a view without visiting the outline's points.
+pub fn glyph_bounds(face: &Face, gid: u16) -> Bounds2 {
+    glyph_by_id(face, u32::from(gid)).bounds
+}
+
 /// Load or build a glyph outline with bounded flattening, retaining its advance even when contours are discarded.
 /// Cache insertion clears existing entries when the glyph-count or aggregate point allowance would be exceeded.
 fn outline(face: &Face, k: GlyphKey) -> Arc<GlyphOutline> {
@@ -908,7 +916,8 @@ fn outline_shared(face: &Face, key: GlyphCacheKey) -> Arc<GlyphOutline> {
     let advance = f64::from(f.glyph_metrics(Size::new(UPEM), LocationRef::default()).advance_width(gid).unwrap_or(UPEM * 0.5));
     let (cap, mapped, gid) = (cap_height(&f), mapped.is_some(), gid.to_u32());
     let points = pen.contours.iter().map(Vec::len).sum();
-    let g = Arc::new(GlyphOutline { points, contours: pen.contours.into(), advance, cap, mapped, gid, face: Some(face.clone()) });
+    let bounds = Bounds2::from_points(pen.contours.iter().flatten().copied());
+    let g = Arc::new(GlyphOutline { points, bounds, contours: pen.contours.into(), advance, cap, mapped, gid, face: Some(face.clone()) });
     let mut cache = glyph_cache().write().unwrap_or_else(PoisonError::into_inner);
     if cache.glyphs.len() >= MAX_CACHED_GLYPHS || cache.points.saturating_add(points) > MAX_SHAPED_POINTS {
         cache.glyphs.clear();
