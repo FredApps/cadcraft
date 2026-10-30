@@ -64,9 +64,14 @@ pub(super) fn may_show(xf: Mat3, ink: Bounds2, view: &Bounds2) -> bool {
         return false;
     }
     let corners = [ink.min, Vec2::new(ink.max.x, ink.min.y), ink.max, Vec2::new(ink.min.x, ink.max.y)];
-    let b = Bounds2::from_points(corners.map(|c| xf.apply(c)));
-    // A placement that isn't finite is left to the mesh code, which handles it.
-    b.is_empty() || !b.min.is_finite() || !b.max.is_finite() || b.intersects(view)
+    let placed = corners.map(|c| xf.apply(c));
+    // A placement that isn't finite is left to the mesh code, which handles it. Bounds skip
+    // non-finite points, so every corner is checked before they are built.
+    if placed.iter().any(|p| !p.is_finite()) {
+        return true;
+    }
+    let b = Bounds2::from_points(placed);
+    b.is_empty() || b.intersects(view)
 }
 
 fn detail(xf: Mat3, pixel: f64) -> Detail {
@@ -281,6 +286,11 @@ mod view_tests {
         let em = Bounds2::new(Vec2::new(0.0, 0.0), Vec2::new(1000.0, 1000.0));
         assert!(!may_show(xf, em, &overhang), "an em-sized glyph is left out of the same view");
         assert!(!may_show(xf, Bounds2::EMPTY, &overhang), "a glyph without ink shows nothing");
+        // One corner lands within f64, the far one overflows: the glyph is left to the mesh code.
+        let huge = Mat3 { a: 1.0e305, b: 0.0, c: 0.0, d: 1.0e305, e: 0.0, f: 0.0 };
+        let wide = Bounds2::new(Vec2::new(0.0, 0.0), Vec2::new(1.0e4, 1.0e4));
+        let far = Bounds2::new(Vec2::new(-10.0, -10.0), Vec2::new(-5.0, -5.0));
+        assert!(may_show(huge, wide, &far), "an overflowing corner keeps the glyph");
     }
 }
 
