@@ -31,6 +31,19 @@ pub(super) fn grip_options(app: &CadApp, (h, i): (Handle, usize)) -> Vec<cadcraf
     st.doc.entity(h).map(|e| cadcraft_engine::grips::grip_actions(&e.kind, i)).unwrap_or_default()
 }
 
+/// The grip menu's first item, plain Stretch, named for what the grip is: a polyline vertex
+/// (Stretch Vertex) or a spline fit point (Move Fit Point).
+fn stretch_label(options: &[cadcraft_engine::grips::GripAction]) -> &'static str {
+    use cadcraft_engine::grips::GripAction;
+    if options.contains(&GripAction::RemoveVertex) {
+        "Stretch Vertex"
+    } else if options.contains(&GripAction::AddFitPoint) || options.contains(&GripAction::RemoveFitPoint) {
+        "Move Fit Point"
+    } else {
+        "Stretch"
+    }
+}
+
 /// The menu of a multifunctional grip: Stretch and its options. A choice makes the grip hot and
 /// runs the option at the grip prompt, as typing its keyword would.
 pub(super) fn grip_menu(app: &mut CadApp, resp: &egui::Response) {
@@ -39,8 +52,7 @@ pub(super) fn grip_menu(app: &mut CadApp, resp: &egui::Response) {
     let mut chosen: Option<Option<cadcraft_engine::grips::GripAction>> = None;
     let open = resp
         .context_menu(|ui| {
-            let vertex = options.contains(&cadcraft_engine::grips::GripAction::RemoveVertex);
-            if ui.button(crate::i18n::t(if vertex { "Stretch Vertex" } else { "Stretch" })).clicked() {
+            if ui.button(crate::i18n::t(stretch_label(&options))).clicked() {
                 chosen = Some(None);
                 ui.close();
             }
@@ -85,8 +97,7 @@ pub(super) fn hover_grip_menu(app: &mut CadApp, ui: &egui::Ui, xf: &Xf, hover: O
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                     ui.spacing_mut().button_padding = vec2(8.0, 4.0);
                     let item = |ui: &mut egui::Ui, label: &str| ui.add(egui::Button::new(crate::i18n::t(label)).frame_when_inactive(false)).clicked();
-                    let vertex = options.contains(&cadcraft_engine::grips::GripAction::RemoveVertex);
-                    if item(ui, if vertex { "Stretch Vertex" } else { "Stretch" }) {
+                    if item(ui, stretch_label(&options)) {
                         chosen = Some(None);
                     }
                     for a in &options {

@@ -310,3 +310,63 @@ fn move_with_dim_line_takes_the_text_past_the_arrows_and_the_line_out_to_it() {
     let reach = g.lines.iter().flatten().filter(|p| (p.y - 6.0).abs() < 1e-9).map(|p| p.x).fold(f64::MIN, f64::max);
     assert!(reach > 16.0, "the dimension line runs out under the text: {reach}");
 }
+
+/// A spline's fit point grips offer Add and Remove Fit Point (#2325, butzzi-art's request):
+/// Add goes between the picked point and the neighbour it is nearer to, or on the end it is
+/// beside; Remove refits without the point; both are one undo step.
+#[test]
+fn spline_fit_point_grips_add_and_remove_fit_points() {
+    use super::GripAction::{AddFitPoint, RemoveFitPoint};
+    let mut s = Session::new();
+    let sp = h(&s.execute("spline", &json!({"fit": [[0, 0], [2, 2], [4, 0], [6, 2]]})).unwrap());
+    let fit = |s: &Session| match kind(s, sp) {
+        EntityKind::Spline(x) => x.fit,
+        _ => Vec::new(),
+    };
+    assert_eq!(grip_actions(&kind(&s, sp), 1), [AddFitPoint, RemoveFitPoint]);
+    // A control-point spline has no fit point options.
+    let cv = h(&s.execute("spline", &json!({"control": [[0, 10], [2, 12], [4, 10]]})).unwrap());
+    assert!(grip_actions(&kind(&s, cv), 1).is_empty());
+
+    // Between (2,2) and (4,0): after the picked point.
+    let hex = sp.hex();
+    s.execute("grip.option", &json!({"handle": hex, "index": 1, "option": "addFitPoint", "to": [3, 1]})).unwrap();
+    assert_eq!(fit(&s), [v(0.0, 0.0), v(2.0, 2.0), v(3.0, 1.0), v(4.0, 0.0), v(6.0, 2.0)]);
+    // Between (0,0) and (2,2), picked from (2,2): before it.
+    s.execute("grip.option", &json!({"handle": hex, "index": 1, "option": "addFitPoint", "to": [1, 1.2]})).unwrap();
+    assert_eq!(fit(&s).get(1).copied(), Some(v(1.0, 1.2)));
+    // Beside the last point, away from the curve: a new end.
+    s.execute("grip.option", &json!({"handle": hex, "index": 5, "option": "addFitPoint", "to": [8, 3]})).unwrap();
+    assert_eq!(fit(&s).last().copied(), Some(v(8.0, 3.0)));
+    // An existing fit point is not added twice.
+    assert!(s.execute("grip.option", &json!({"handle": hex, "index": 0, "option": "addFitPoint", "to": [3, 1]})).is_err());
+
+    // Remove the added end, then undo it: one step each.
+    s.execute("grip.option", &json!({"handle": hex, "index": 6, "option": "removeFitPoint"})).unwrap();
+    assert_eq!(fit(&s).len(), 6);
+    assert!(matches!(kind(&s, sp), EntityKind::Spline(x) if x.eval(x.domain().1).near(v(6.0, 2.0), 1e-6)), "the curve ends at the new last point");
+    s.execute("u", &json!({})).unwrap();
+    assert_eq!(fit(&s).last().copied(), Some(v(8.0, 3.0)));
+
+    // An open spline keeps two fit points: the last two have no Remove.
+    let two = h(&s.execute("spline", &json!({"fit": [[0, 0], [5, 5]]})).unwrap());
+    assert_eq!(grip_actions(&kind(&s, two), 0), [AddFitPoint]);
+}
+
+/// The grip menu path: the option runs at the hot grip prompt like typing its keyword, with the
+/// point picked after it.
+#[test]
+fn a_spline_fit_grip_option_runs_at_the_hot_grip_prompt() {
+    let mut s = Session::new();
+    let sp = h(&s.execute("spline", &json!({"fit": [[0, 0], [2, 2], [4, 0], [6, 2]]})).unwrap());
+    s.set_selection(vec![sp]);
+    s.start_grip_edit(&[(sp, 2)]).unwrap();
+    s.input(crate::Input::Keyword(super::GripAction::AddFitPoint.keyword().to_string())).unwrap();
+    assert!(s.prompt_text().contains("ADD FIT POINT"), "{}", s.prompt_text());
+    assert!(!s.preview(v(5.0, 1.0)).is_empty(), "the refitted spline is previewed");
+    s.input(crate::Input::Point(v(5.0, 1.0))).unwrap();
+    assert!(matches!(kind(&s, sp), EntityKind::Spline(x) if x.fit.len() == 5 && x.fit[3] == v(5.0, 1.0)));
+    s.start_grip_edit(&[(sp, 3)]).unwrap();
+    s.input(crate::Input::Keyword(super::GripAction::RemoveFitPoint.keyword().to_string())).unwrap();
+    assert!(matches!(kind(&s, sp), EntityKind::Spline(x) if x.fit.len() == 4 && !x.fit.contains(&v(5.0, 1.0))));
+}

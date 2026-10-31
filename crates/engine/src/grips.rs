@@ -509,6 +509,11 @@ pub enum GripAction {
     CenterVertically,
     /// Dimension text: back to its default place.
     ResetTextPosition,
+    /// Spline with fit data: a new fit point next to this one (before or after it, whichever
+    /// keeps the fit points' path shorter), the curve refitted through it.
+    AddFitPoint,
+    /// Spline with fit data: remove this fit point (both copies of a kink), refitting the curve.
+    RemoveFitPoint,
 }
 
 impl GripAction {
@@ -527,6 +532,8 @@ impl GripAction {
             GripAction::AboveDimLine => "Above dim line",
             GripAction::CenterVertically => "center Vertically",
             GripAction::ResetTextPosition => "Reset text position",
+            GripAction::AddFitPoint => "Add fit point",
+            GripAction::RemoveFitPoint => "Remove fit point",
         }
     }
     /// The grip menu label.
@@ -544,6 +551,8 @@ impl GripAction {
             GripAction::AboveDimLine => "Above Dim Line",
             GripAction::CenterVertically => "Center Vertically",
             GripAction::ResetTextPosition => "Reset Text Position",
+            GripAction::AddFitPoint => "Add Fit Point",
+            GripAction::RemoveFitPoint => "Remove Fit Point",
         }
     }
     /// The mode name on the command line ("** ADD VERTEX **").
@@ -561,15 +570,58 @@ impl GripAction {
             GripAction::AboveDimLine => "** ABOVE DIM LINE **",
             GripAction::CenterVertically => "** CENTER VERTICALLY **",
             GripAction::ResetTextPosition => "** RESET TEXT POSITION **",
+            GripAction::AddFitPoint => "** ADD FIT POINT **",
+            GripAction::RemoveFitPoint => "** REMOVE FIT POINT **",
         }
     }
     /// Whether the option needs a point (or value); the others act at once.
     pub fn needs_point(self) -> bool {
         !matches!(
             self,
-            GripAction::RemoveVertex | GripAction::ToLine | GripAction::AboveDimLine | GripAction::CenterVertically | GripAction::ResetTextPosition
+            GripAction::RemoveVertex
+                | GripAction::ToLine
+                | GripAction::AboveDimLine
+                | GripAction::CenterVertically
+                | GripAction::ResetTextPosition
+                | GripAction::RemoveFitPoint
         )
     }
+}
+
+/// Most fit points a grip can add to a spline.
+const MAX_FIT_POINTS: usize = 10_000;
+
+/// Fewest fit points a spline keeps: two when open, three when closed.
+fn min_fit_points(sp: &cadcraft_geom::Spline) -> usize {
+    if sp.closed { 3 } else { 2 }
+}
+
+/// The fit points without point `i` and its repeats (a kink is a repeated point).
+fn fit_without(fit: &[Vec2], i: usize) -> Vec<Vec2> {
+    let Some(at) = fit.get(i).copied() else { return fit.to_vec() };
+    fit.iter().copied().filter(|q| !q.near(at, 1e-12)).collect()
+}
+
+/// The fit points with `to` added next to point `i`: before or after it (after its repeats),
+/// whichever makes the path through the fit points shorter, so a point added beside the first
+/// or last fit point goes on the end it is nearer to, and one between two points goes between
+/// them. `None` for a point that already is a fit point or an index out of range.
+fn fit_with(fit: &[Vec2], i: usize, to: Vec2, closed: bool) -> Option<Vec<Vec2>> {
+    let at = *fit.get(i)?;
+    if fit.iter().any(|q| q.near(to, 1e-12)) || fit.len() >= MAX_FIT_POINTS {
+        return None;
+    }
+    let after = i + 1 + fit.iter().skip(i + 1).take_while(|q| q.near(at, 1e-12)).count();
+    let length = |pts: &[Vec2]| {
+        let open: f64 = pts.windows(2).map(|w| w.first().zip(w.get(1)).map_or(0.0, |(a, b)| a.dist(*b))).sum();
+        let close = if closed { pts.first().zip(pts.last()).map_or(0.0, |(a, b)| a.dist(*b)) } else { 0.0 };
+        open + close
+    };
+    let mut before_pts = fit.to_vec();
+    before_pts.insert(i.min(before_pts.len()), to);
+    let mut after_pts = fit.to_vec();
+    after_pts.insert(after.min(after_pts.len()), to);
+    Some(if length(&before_pts) < length(&after_pts) - 1e-12 { before_pts } else { after_pts })
 }
 
 /// The multifunctional options of grip `index` of `kind` (empty when it has only Stretch):
@@ -607,6 +659,17 @@ pub fn grip_actions(kind: &EntityKind, index: usize) -> Vec<GripAction> {
         // The text grip of a multileader.
         EntityKind::MLeader(m) if m.text_grip() == Some(index) => {
             vec![GripAction::MoveWithLeader, GripAction::MoveTextOnly, GripAction::ResetTextPosition]
+        }
+        // A fit point grip of a spline with fit data.
+        EntityKind::Spline(sp) if index < sp.fit.len() => {
+            let mut v = Vec::new();
+            if sp.fit.len() < MAX_FIT_POINTS {
+                v.push(GripAction::AddFitPoint);
+            }
+            if fit_without(&sp.fit, index).len() >= min_fit_points(sp) {
+                v.push(GripAction::RemoveFitPoint);
+            }
+            v
         }
         _ => Vec::new(),
     }
@@ -657,6 +720,17 @@ pub fn grip_action(kind: &EntityKind, index: usize, action: GripAction, to: Opti
                 return None;
             }
             p.vertices.get_mut(i)?.bulge = bulge;
+        }
+        (EntityKind::Spline(sp), GripAction::AddFitPoint) => {
+            let fit = fit_with(&sp.fit, index, to?, sp.closed)?;
+            *sp = sp.refit(&fit, sp.closed);
+        }
+        (EntityKind::Spline(sp), GripAction::RemoveFitPoint) => {
+            let fit = fit_without(&sp.fit, index);
+            if fit.len() < min_fit_points(sp) {
+                return None;
+            }
+            *sp = sp.refit(&fit, sp.closed);
         }
         (EntityKind::LwPolyline(p), GripAction::ToLine) => {
             let PolyGrip::Mid(i) = poly_grip(p, index)? else { return None };

@@ -354,6 +354,7 @@ impl Interactive for GripEdit {
             Ask::Action(a) => {
                 let (msg, accept) = match a {
                     GripAction::AddVertex => ("Specify new vertex point", Accept::POINT),
+                    GripAction::AddFitPoint => ("Specify new fit point", Accept::POINT),
                     GripAction::ToArc => ("Specify a point on the arc", Accept::POINT),
                     GripAction::Lengthen => ("Specify end point or length change", Accept::POINT_OR_NUMBER),
                     GripAction::Radius => ("Specify radius", Accept::POINT_OR_NUMBER),
@@ -361,6 +362,7 @@ impl Interactive for GripEdit {
                     // Dimension and multileader text alike.
                     GripAction::MoveTextOnly | GripAction::MoveWithLeader => ("Specify new location for text", Accept::POINT),
                     GripAction::RemoveVertex
+                    | GripAction::RemoveFitPoint
                     | GripAction::ToLine
                     | GripAction::AboveDimLine
                     | GripAction::CenterVertically

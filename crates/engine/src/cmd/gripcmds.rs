@@ -22,7 +22,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("grip.mirror", "Grip Mirror", run_grip_mirror)
             .params("{handles?, base | baseHandle+index, to (second mirror point), copy?}"),
         CommandSpec::new("grip.option", "Grip Option", run_grip_option).params(
-            "{handle, index, option: addVertex|removeVertex|toArc|toLine|lengthen|radius|moveWithDimLine|moveTextOnly|moveWithLeader|aboveDimLine|centerVertically|resetTextPosition, to? (point), value? (lengthen: length change; radius)}",
+            "{handle, index, option: addVertex|removeVertex|toArc|toLine|lengthen|radius|moveWithDimLine|moveTextOnly|moveWithLeader|aboveDimLine|centerVertically|resetTextPosition|addFitPoint|removeFitPoint, to? (point), value? (lengthen: length change; radius)}",
         ),
         CommandSpec::new("grip", "Grip Edit", run_grip)
             .params("interactive: select grips, then the grip modes with [Base point/Copy/Undo/Reference/eXit]; JSON: use grip.stretch/move/rotate/scale/mirror")
@@ -158,7 +158,7 @@ fn run_grip_option(s: &mut Session, p: &Value) -> Result<Value> {
         .ok_or_else(|| {
             bad(
                 cmd,
-                "`option` must be addVertex, removeVertex, toArc, toLine, lengthen, radius, moveWithDimLine, moveTextOnly, moveWithLeader, aboveDimLine, centerVertically or resetTextPosition",
+                "`option` must be addVertex, removeVertex, toArc, toLine, lengthen, radius, moveWithDimLine, moveTextOnly, moveWithLeader, aboveDimLine, centerVertically, resetTextPosition, addFitPoint or removeFitPoint",
             )
         })?;
     if curves::is_locked(s, h) {
