@@ -421,11 +421,10 @@ fn is_mark(c: char) -> bool {
     matches!(u32::from(c), 0x0300..=0x036F | 0x0591..=0x05BD | 0x05BF | 0x05C1..=0x05C2 | 0x05C4..=0x05C5 | 0x05C7 | 0x0610..=0x061A | 0x064B..=0x065F | 0x0670 | 0x200C..=0x200D | 0xFE00..=0xFE0F | 0xFE20..=0xFE2F)
 }
 
-/// The pieces of `s` in display order for a left-to-right line, each to be shaped on its own:
+/// The pieces of `s` in display order for a left-to-right line, as [`job`]'s layout shows them:
 /// left-to-right runs whole, right-to-left runs letter by letter (with their marks) reversed and
-/// brackets mirrored. The text shaper turns any piece holding a right-to-left letter around, and
-/// with a font that covers Latin and Hebrew alike (Segoe UI) it would turn the whole name
-/// (extension included) around; one letter per piece leaves nothing to turn.
+/// brackets mirrored. Only [`ltr`] uses it, to write that display order as plain text for tests
+/// and logs; on screen the text shaper orders the runs itself ([`job`] sets the line direction).
 fn display_pieces(s: &str) -> Vec<String> {
     let chars: Vec<char> = s.chars().collect();
     let mut out = Vec::new();

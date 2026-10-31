@@ -460,6 +460,25 @@ fn lay(p: &egui::Painter, s: String, font: egui::FontId, color: egui::Color32) -
     p.layout_job(crate::i18n::job(&s, font, color))
 }
 
+/// The text shown left of the caret when it is not the whole of `buffer`: a buffer ending in a
+/// right-to-left run (Hebrew) takes its next letter at the left of that run, so the caret goes
+/// there rather than after the line's last glyph. `None` when the caret is at the line's end.
+fn caret_prefix(buffer: &str) -> Option<String> {
+    if !crate::i18n::has_rtl(buffer) {
+        return None;
+    }
+    let chars: Vec<char> = buffer.chars().collect();
+    let last = chars.len().checked_sub(1)?;
+    let runs = cadcraft_fonts::bidi::visual_runs(&chars, Some(false));
+    let at = runs.iter().position(|(r, _)| r.contains(&last))?;
+    let (_, rtl) = runs.get(at)?;
+    let upto = if *rtl { at } else { at + 1 };
+    if upto >= runs.len() {
+        return None;
+    }
+    Some(runs.iter().take(upto).filter_map(|(r, _)| chars.get(r.clone())).flatten().collect())
+}
+
 /// Draw the floating command bar and its history over the bottom-centre of `canvas`; the bar is 48 % of the canvas width, clamped to 360–760 points and never wider than the canvas minus 8 points.
 pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
     let t = Tokens::get();
@@ -568,7 +587,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
     let g = lay(&p, app.cmd.buffer.clone(), font.clone(), t.text);
     let gw = g.size().x;
     p.galley(pos2(x, bar.center().y - g.size().y / 2.0), g, t.text);
-    let mut caret_x = x + gw;
+    // The caret is where the next letter goes: the end of the buffer in reading order, which is
+    // the left edge of a right-to-left run the buffer ends with.
+    let mut caret_x = x + caret_prefix(&app.cmd.buffer).map_or(gw, |pre| lay(&p, pre, font.clone(), t.text).size().x);
     // The IME's composition text sits after the buffer (underlined) until it is committed.
     if !app.cmd.preedit.is_empty() {
         let pg = p.layout_no_wrap(app.cmd.preedit.clone(), font, t.text);
@@ -974,5 +995,21 @@ mod autocomplete_tests {
         submit(&mut app);
         assert!(app.session.running.is_none());
         assert!(app.session.log.iter().any(|l| l.contains("unknown command")), "{:?}", app.session.log);
+    }
+}
+
+#[cfg(test)]
+mod caret_tests {
+    use super::caret_prefix;
+
+    /// A buffer ending in Hebrew puts the caret at the left of that run, where the next Hebrew
+    /// letter appears (#2317 review); otherwise it stays at the end of the line.
+    #[test]
+    fn the_caret_goes_where_the_next_letter_appears() {
+        assert_eq!(caret_prefix("layer שלום").as_deref(), Some("layer "));
+        assert_eq!(caret_prefix("שלום"), Some(String::new()));
+        assert_eq!(caret_prefix("שלום plan"), None);
+        assert_eq!(caret_prefix("line 0,0"), None);
+        assert_eq!(caret_prefix(""), None);
     }
 }
