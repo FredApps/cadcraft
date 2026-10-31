@@ -149,6 +149,10 @@ pub struct Session {
     /// Warnings a command shows in a window (a hatch boundary that isn't closed): the UI shows
     /// the first one and takes it off when it is closed.
     pub notices: Vec<Notice>,
+    /// The object named with a point for the input a prompt picking one object is taking
+    /// ([`Session::input_object`]): a pick at exactly that point picks that object
+    /// ([`Session::pick_object`]).
+    pick_hint: Option<(Handle, Vec2)>,
 }
 
 /// A warning shown in a window ([`Session::notices`]).
@@ -207,6 +211,7 @@ impl Session {
             lisp_last: None,
             hatch_picks: None,
             notices: Vec::new(),
+            pick_hint: None,
         }
     }
 
@@ -369,3 +374,7 @@ impl Session {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/support/temp_dir.rs"]
+mod temp_dir;
