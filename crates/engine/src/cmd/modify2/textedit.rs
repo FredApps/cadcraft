@@ -89,8 +89,11 @@ impl Interactive for TextEditM {
         match (&self.h, i) {
             (None, Input::Point(p)) => {
                 let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
-                let old = text_of(&curves::entity(s, h)?.kind)
-                    .ok_or_else(|| other("Select a text, mtext, attribute definition, dimension or multileader."))?;
+                let kind = curves::entity(s, h)?.kind;
+                let old = text_of(&kind).ok_or_else(|| match kind {
+                    EntityKind::MLeader(_) => other("This multileader carries a block, not text."),
+                    _ => other("Select a text, mtext, attribute definition, dimension or multileader."),
+                })?;
                 self.h = Some((h, old));
                 Ok(Step::Continue)
             }

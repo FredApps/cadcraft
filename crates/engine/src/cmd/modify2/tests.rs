@@ -682,6 +682,10 @@ fn textedit_edits_a_multileader() {
     s.execute("block", &json!({"name": "TAG", "base": [-1, -1], "handles": [sq], "keep": "delete"})).unwrap();
     let b = h(&s.execute("mleader", &json!({"points": [[10, 5], [0, 0]], "block": "TAG"})).unwrap());
     assert!(s.execute("textedit", &json!({"handle": b, "text": "x"})).is_err());
+    // Picking one says why.
+    s.execute("erase", &json!({"handles": [m]})).unwrap();
+    s.cmdline("textedit 5,2.5").unwrap();
+    assert!(s.log.iter().any(|l| l.contains("carries a block")), "{:?}", s.log);
 }
 
 #[test]
