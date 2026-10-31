@@ -229,6 +229,7 @@ impl Pen<'_> {
         self.tri([(x, y), (x - ux * 3.0 + nx * 1.4, y - uy * 3.0 + ny * 1.4), (x - ux * 3.0 - nx * 1.4, y - uy * 3.0 - ny * 1.4)], c);
     }
     /// A larger arrowhead than [`Pen::arrow_tip`]: `len` long, `half` wide either side.
+    #[allow(clippy::too_many_arguments)]
     fn big_arrow(&self, x: f32, y: f32, dx: f32, dy: f32, len: f32, half: f32, c: Color32) {
         let l = (dx * dx + dy * dy).sqrt().max(1e-3);
         let (ux, uy) = (dx / l, dy / l);
@@ -258,7 +259,7 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
     paint_constraints(&pen, icon, b, a, dim);
 }
 
-fn paint_file_view(pen: &Pen<'_>, icon: Icon, b: Color32, a: Color32, _dim: bool) {
+fn paint_file_view(pen: &Pen<'_>, icon: Icon, b: Color32, a: Color32, dim: bool) {
     use Icon::*;
     match icon {
         New => {
@@ -277,7 +278,7 @@ fn paint_file_view(pen: &Pen<'_>, icon: Icon, b: Color32, a: Color32, _dim: bool
                 // A large pencil across the lower-right corner: body, ferrule line and a filled tip.
                 pen.p.add(egui::Shape::convex_polygon(
                     [(12.6, 19.4), (20.6, 11.4), (23.6, 14.4), (15.6, 22.4)].iter().map(|(x, y)| pen.at(*x, *y)).collect(),
-                    t.panel,
+                    Tokens::get().panel,
                     Stroke::NONE,
                 ));
                 pen.poly(&[(12.6, 19.4), (20.6, 11.4), (23.6, 14.4), (15.6, 22.4)], true, a);
@@ -299,7 +300,7 @@ fn paint_file_view(pen: &Pen<'_>, icon: Icon, b: Color32, a: Color32, _dim: bool
                 pen.at(m(cx + r * ang.cos()), cy - r * ang.sin())
             }));
             pts.push(pen.at(m(7.5), cy - r));
-            p.add(egui::Shape::line(pts, Stroke::new(pen.w * 1.8, col)));
+            pen.p.add(egui::Shape::line(pts, Stroke::new(pen.w * 1.8, col)));
             // The arrowhead at the free end, pointing back along the top run.
             let dx = if icon == Undo { -1.0 } else { 1.0 };
             pen.big_arrow(m(5.0), cy - r, dx, 0.0, 5.0, 4.6, col);
@@ -315,7 +316,7 @@ fn paint_file_view(pen: &Pen<'_>, icon: Icon, b: Color32, a: Color32, _dim: bool
             pen.rect(3.8, 4.0, 7.4, 4.0, b);
             pen.rect(3.8, 12.0, 7.4, 6.0, b);
             pen.c(17.5, 13.0, 4.0, a);
-            p.line_segment([pen.at(20.4, 15.9), pen.at(23.0, 18.5)], Stroke::new(pen.w * 1.8, a));
+            pen.p.line_segment([pen.at(20.4, 15.9), pen.at(23.0, 18.5)], Stroke::new(pen.w * 1.8, a));
         }
         Publish => {
             pen.rect(3.0, 10.0, 13.0, 7.0, b);
@@ -916,7 +917,7 @@ fn paint_display_toggles(pen: &Pen<'_>, icon: Icon, b: Color32, _a: Color32, dim
             if let Some(f) = outline.first().copied() {
                 outline.push(f);
             }
-            p.add(egui::Shape::line(outline, Stroke::new(pen.w * 1.2, b)));
+            pen.p.add(egui::Shape::line(outline, Stroke::new(pen.w * 1.2, b)));
             pen.c(12.0, 12.0, 3.2, b);
         }
         Annotation => {
@@ -951,7 +952,7 @@ fn paint_navigation_controls(pen: &Pen<'_>, icon: Icon, b: Color32, a: Color32, 
         }
         ZoomIn | ZoomOut => {
             pen.c(10.0, 10.0, 7.0, b);
-            p.line_segment([pen.at(15.0, 15.0), pen.at(21.5, 21.5)], Stroke::new(pen.w * 2.2, b));
+            pen.p.line_segment([pen.at(15.0, 15.0), pen.at(21.5, 21.5)], Stroke::new(pen.w * 2.2, b));
             pen.la(6.5, 10.0, 13.5, 10.0);
             if icon == ZoomIn {
                 pen.la(10.0, 6.5, 10.0, 13.5);
@@ -960,7 +961,7 @@ fn paint_navigation_controls(pen: &Pen<'_>, icon: Icon, b: Color32, a: Color32, 
         MoveTop | MoveBottom => {
             // A bar at the end the arrow points to.
             let (bar, tip, tail, dir) = if icon == MoveTop { (4.0, 7.0, 21.0, -1.0) } else { (20.0, 17.0, 3.0, 1.0) };
-            p.line_segment([pen.at(5.0, bar), pen.at(19.0, bar)], Stroke::new(pen.w * 1.6, a));
+            pen.p.line_segment([pen.at(5.0, bar), pen.at(19.0, bar)], Stroke::new(pen.w * 1.6, a));
             pen.l(12.0, tail, 12.0, tip - 5.0 * dir);
             pen.big_arrow(12.0, tip, 0.0, dir, 6.0, 4.5, b);
         }
@@ -973,7 +974,7 @@ fn paint_navigation_controls(pen: &Pen<'_>, icon: Icon, b: Color32, a: Color32, 
             // Four right-angle corners framing a rectangle.
             let s = Stroke::new(pen.w * 1.6, b);
             for (x, y, dx, dy) in [(3.0, 5.0, 1.0, 1.0), (21.0, 5.0, -1.0, 1.0), (3.0, 19.0, 1.0, -1.0), (21.0, 19.0, -1.0, -1.0)] {
-                p.line(vec![pen.at(x + dx * 5.0, y), pen.at(x, y), pen.at(x, y + dy * 4.5)], s);
+                pen.p.line(vec![pen.at(x + dx * 5.0, y), pen.at(x, y), pen.at(x, y + dy * 4.5)], s);
             }
             pen.rect(8.0, 9.0, 8.0, 6.0, a);
         }
@@ -999,7 +1000,7 @@ fn paint_navigation_controls(pen: &Pen<'_>, icon: Icon, b: Color32, a: Color32, 
             if let Some(f) = outline.first().copied() {
                 outline.push(f);
             }
-            p.add(egui::Shape::line(outline, Stroke::new(pen.w, a)));
+            pen.p.add(egui::Shape::line(outline, Stroke::new(pen.w, a)));
             pen.c(17.5, 17.5, 1.5, a);
         }
         Close => {
