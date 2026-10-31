@@ -515,7 +515,7 @@ pub fn paint_arrow(p: &egui::Painter, r: egui::Rect, names: &Names, name: &str) 
         }
     }
     let mut mesh = egui::Mesh::default();
-    for t in g.tris.chunks_exact(3) {
+    for t in g.tris.as_chunks::<3>().0 {
         let base = u32::try_from(mesh.vertices.len()).unwrap_or(u32::MAX);
         for v in t {
             mesh.colored_vertex(at(v), col);

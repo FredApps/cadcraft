@@ -82,6 +82,20 @@ fn expand(objects: &HashMap<String, Vec<Tag>>, h: &str, depth: usize, seen: &mut
     Some(s)
 }
 
+/// Whether the `ACAD_FIELD` dictionary `dict` holds a field the reader turns into a formula
+/// ([`resolve`] does that only for a field within [`MAX_LEN`] and [`MAX_DEPTH`] whose children are
+/// all there). `objects`: the file's dictionaries and fields by handle, upper-case as written.
+/// A field the reader declined is kept as it is on save, whatever the text now holds.
+pub(crate) fn resolves(objects: &HashMap<String, Vec<Tag>>, dict: &str) -> bool {
+    let found = (|| code(objects, &entry(objects.get(dict)?, "TEXT")?, 0))();
+    found.is_some_and(|c| c.contains("%<\\"))
+}
+
+/// A record's handle as [`resolves`] keys it.
+pub(crate) fn object_handle(tags: &[Tag]) -> Option<String> {
+    handle_of(tags)
+}
+
 /// Give the texts with AutoCAD fields their templates as formulas.
 pub(crate) fn resolve(secs: &[Section], d: &mut Drawing) {
     let mut objects: HashMap<String, Vec<Tag>> = HashMap::new();

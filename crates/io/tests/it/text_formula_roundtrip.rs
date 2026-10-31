@@ -223,3 +223,25 @@ fn a_replaced_field_is_not_restored_on_reopen() {
     let t = back.model.iter().find_map(|e| if let EntityKind::Text(t) = &e.kind { Some(t.clone()) } else { None }).unwrap();
     assert_eq!((t.value.as_str(), t.formula.as_deref()), ("plain", None));
 }
+
+/// A field the reader cannot make a formula of (too long, nested too deep, a child missing)
+/// never reached the text, so saving keeps it as it was read (#2318 review: it was dropped with
+/// its ACAD_FIELD objects, leaving only the cached value).
+#[test]
+fn a_field_the_reader_declines_is_kept_on_save() {
+    // Too long: the code goes on in 3 groups past 16,384 characters.
+    let long = format!("%<\\AcVar Date>% {}", format!("\n3\n{}", "x".repeat(2_000)).repeat(10));
+    // A child the code names is not in the file.
+    let orphan = "Sum: %<\\_FldIdx 0>%\n360\nFFF99";
+    for field in [long.as_str(), orphan] {
+        let src = with_field(field);
+        let read = cadcraft_io::read(src.as_bytes(), "a.dxf").unwrap();
+        assert!(read.model.iter().all(|e| !matches!(&e.kind, EntityKind::Text(t) if t.formula.is_some())), "declined: no formula");
+        let out = String::from_utf8_lossy(&cadcraft_io::write(&read, "a.dxf").unwrap()).into_owned();
+        assert!(out.contains("AcDbField") && out.contains("ACAD_FIELD"), "the field is written back");
+        // And it stays through another round.
+        let again = cadcraft_io::read(out.as_bytes(), "a.dxf").unwrap();
+        let out2 = String::from_utf8_lossy(&cadcraft_io::write(&again, "a.dxf").unwrap()).into_owned();
+        assert!(out2.contains("AcDbField"));
+    }
+}
