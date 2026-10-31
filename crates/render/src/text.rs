@@ -77,7 +77,7 @@ pub(super) fn mesh(g: &TextGlyph, xf: Mat3, pixel: f64) -> Arc<Mesh> {
     let contours = ttf::glyph_contours(&g.face, g.gid);
     let points = contours.iter().map(Vec::len).try_fold(0usize, usize::checked_add);
     // Font data is untrusted; don't hand unbounded or invalid paths to the tessellator.
-    if !points.is_some_and(|n| n <= MAX_POINTS) || contours.iter().flatten().any(|p| !p.is_finite() || p.x.abs().max(p.y.abs()) > 1.0e6) {
+    if points.is_none_or(|n| n > MAX_POINTS) || contours.iter().flatten().any(|p| !p.is_finite() || p.x.abs().max(p.y.abs()) > 1.0e6) {
         return Arc::new(Mesh { contours: Arc::default(), triangles: Vec::new() });
     }
     let contours = match detail {
@@ -163,13 +163,12 @@ fn simplify(contour: &[Vec2], tolerance: f64) -> Vec<Vec2> {
     if result.len() >= 4 { result } else { contour.to_vec() }
 }
 
-/// Glyph contours filled by the non-zero winding rule, as TrueType and OpenType define it: a
-/// glyph drawn from overlapping contours (AutoCAD's TrueType versions of its stroke fonts, many
-/// modern fonts) is solid where they overlap, not hollow as the even-odd rule would leave it.
-/// Work in font units so f32 precision is independent of drawing coordinates; the placement
-/// stays f64. The slab filler (even-odd) remains the fallback when tessellation fails
-/// (including its u16 vertex limit).
-pub(crate) fn triangulate(contours: &[Vec<Vec2>]) -> Vec<Vec2> {
+/// Monotone tessellation with the nonzero winding rule that TrueType and OpenType outlines are
+/// defined with: overlapping contours stay filled (Arial Unicode's 진 draws its final ㄴ twice,
+/// which even-odd cancelled out) and holes are contours wound the other way. Work in font units
+/// so f32 precision is independent of drawing coordinates; the placement stays f64. The existing
+/// slab filler remains the fallback when tessellation fails (including its u16 vertex limit).
+fn triangulate(contours: &[Vec<Vec2>]) -> Vec<Vec2> {
     let mut path = Path::builder();
     for contour in contours {
         let Some(&first) = contour.first().filter(|_| contour.len() >= 3) else { continue };
@@ -194,47 +193,73 @@ pub(crate) fn triangulate(contours: &[Vec<Vec2>]) -> Vec<Vec2> {
     buffers.indices.into_iter().filter_map(|i| buffers.vertices.get(usize::from(i)).copied()).collect()
 }
 
-/// [`triangulate`] for contours placed in drawing coordinates (glyphs shaped without a font
-/// glyph reference, such as right-to-left runs): tessellated about their own corner so large
-/// coordinates keep their precision.
+/// [`triangulate`] for a glyph outline already placed in drawing coordinates (complex-script
+/// runs carry no [`TextGlyph`]): tessellated relative to its first point so f32 keeps the
+/// precision. Outlines past the limits [`mesh`] applies keep the slab filler.
 pub fn triangulate_placed(contours: &[Vec<Vec2>]) -> Vec<Vec2> {
-    let Some(o) = contours.iter().flatten().copied().find(|p| p.is_finite()) else { return Vec::new() };
-    let local: Vec<Vec<Vec2>> = contours.iter().map(|c| c.iter().map(|p| *p - o).collect()).collect();
-    triangulate(&local).into_iter().map(|p| p + o).collect()
+    let Some(&origin) = contours.iter().flatten().next() else { return Vec::new() };
+    let points = contours.iter().map(Vec::len).try_fold(0usize, usize::checked_add);
+    let out_of_range = |p: &Vec2| {
+        let d = *p - origin;
+        !p.is_finite() || d.x.abs().max(d.y.abs()) > 1.0e6
+    };
+    if !points.is_some_and(|n| n <= MAX_POINTS) || contours.iter().flatten().any(out_of_range) {
+        return crate::fill::triangulate_evenodd(contours);
+    }
+    let local: Vec<Vec<Vec2>> = contours.iter().map(|c| c.iter().map(|&p| p - origin).collect()).collect();
+    triangulate(&local).into_iter().map(|p| p + origin).collect()
 }
 
 #[cfg(test)]
-mod fill_rule_tests {
-    use cadcraft_geom::Vec2;
+mod tests {
+    use super::*;
+
+    fn square(x: f64, y: f64, s: f64) -> Vec<Vec2> {
+        // Clockwise, as TrueType draws outer contours.
+        vec![Vec2::new(x, y), Vec2::new(x, y + s), Vec2::new(x + s, y + s), Vec2::new(x + s, y), Vec2::new(x, y)]
+    }
 
     fn area(tris: &[Vec2]) -> f64 {
         tris.chunks(3)
-            .map(|t| match t {
-                [a, b, c] => ((*b - *a).x * (*c - *a).y - (*b - *a).y * (*c - *a).x).abs() / 2.0,
-                _ => 0.0,
+            .filter_map(|t| match t {
+                [a, b, c] => Some(((*b - *a).x * (*c - *a).y - (*b - *a).y * (*c - *a).x).abs() / 2.0),
+                _ => None,
             })
             .sum()
     }
 
-    fn square(x: f64, y: f64, s: f64) -> Vec<Vec2> {
-        vec![Vec2::new(x, y), Vec2::new(x + s, y), Vec2::new(x + s, y + s), Vec2::new(x, y + s)]
+    #[test]
+    fn duplicated_contour_stays_filled() {
+        // A composite glyph that draws one component twice (Arial Unicode's 진 and its ㄴ).
+        let s = square(0.0, 0.0, 10.0);
+        assert!((area(&triangulate(&[s.clone(), s])) - 100.0).abs() < 1e-6);
     }
 
-    /// Two overlapping contours drawn the same way round (how many fonts build a glyph): the
-    /// overlap is ink, not a hole.
     #[test]
-    fn overlapping_glyph_contours_fill_solid() {
-        let a = area(&super::triangulate(&[square(0.0, 0.0, 10.0), square(5.0, 0.0, 10.0)]));
-        assert!((a - 150.0).abs() < 1e-3, "union area, got {a}");
-        // A counter (the hole of an "o") is drawn the other way round and stays a hole.
-        let mut hole = square(2.0, 2.0, 6.0);
+    fn overlapping_contours_fill_their_union() {
+        let tris = triangulate(&[square(0.0, 0.0, 10.0), square(5.0, 5.0, 10.0)]);
+        assert!((area(&tris) - 175.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn counter_wound_contour_is_still_a_hole() {
+        let mut hole = square(4.0, 4.0, 2.0);
         hole.reverse();
-        let a = area(&super::triangulate(&[square(0.0, 0.0, 10.0), hole]));
-        assert!((a - 64.0).abs() < 1e-3, "ring area, got {a}");
-        // Far from the origin, as right-to-left glyphs are placed.
-        let far: Vec<Vec<Vec2>> =
-            [square(0.0, 0.0, 10.0), square(5.0, 0.0, 10.0)].iter().map(|c| c.iter().map(|p| *p + Vec2::new(-38653.0, 147552.0)).collect()).collect();
-        let a = area(&super::triangulate_placed(&far));
-        assert!((a - 150.0).abs() < 1e-2, "placed union area, got {a}");
+        assert!((area(&triangulate(&[square(0.0, 0.0, 10.0), hole])) - 96.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn placed_outline_far_from_the_origin_keeps_its_place_and_fill() {
+        let s = square(5.0e5, -3.0e5, 2.0);
+        let tris = triangulate_placed(&[s.clone(), s]);
+        assert!((area(&tris) - 4.0).abs() < 1e-6);
+        assert!(tris.iter().all(|p| (5.0e5..=5.0e5 + 2.0).contains(&p.x) && (-3.0e5..=-3.0e5 + 2.0).contains(&p.y)));
+    }
+
+    #[test]
+    fn hostile_placed_outline_never_panics() {
+        assert!(triangulate_placed(&[]).is_empty());
+        let _ = triangulate_placed(&[vec![Vec2::new(f64::NAN, 0.0), Vec2::X, Vec2::Y]]);
+        let _ = triangulate_placed(&[vec![Vec2::ZERO, Vec2::new(1.0e300, 0.0), Vec2::Y]]);
     }
 }
