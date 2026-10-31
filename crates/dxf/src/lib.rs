@@ -181,8 +181,20 @@ pub fn parse_with_limit(bytes: &[u8], max_tags: usize) -> Result<Vec<Tag>> {
     if let Some(body) = bytes.strip_prefix(BINARY_SENTINEL) {
         return parse_binary_with_limit(body, max_tags);
     }
-    // Every group code takes two lines (code, value).
-    let tags = bytes.iter().filter(|&&b| b == b'\n').count().div_ceil(2);
+    // Count nonblank group-code/value pairs, stopping at EOF just as the parser does.
+    let mut lines = bytes.split(|&b| b == b'\n');
+    let mut tags = 0;
+    while let Some(code) = lines.next() {
+        let code = code.trim_ascii();
+        if code.is_empty() {
+            continue;
+        }
+        let Some(value) = lines.next() else { break };
+        tags += 1;
+        if code == b"0" && value.trim_ascii() == b"EOF" {
+            break;
+        }
+    }
     if tags > max_tags {
         return Err(DxfError::TooLarge { tags, limit: max_tags });
     }
@@ -264,7 +276,7 @@ pub fn parse_ascii(text: &str) -> Result<Vec<Tag>> {
 #[allow(clippy::while_let_loop)]
 fn parse_ascii_with_limit(text: &str, max_tags: usize) -> Result<Vec<Tag>> {
     let mut tags = Vec::new();
-    let mut lines = text.lines().enumerate();
+    let mut lines = text.strip_prefix('\u{feff}').unwrap_or(text).lines().enumerate();
     loop {
         let Some((ln, code_line)) = lines.next() else { break };
         let ct = code_line.trim();
@@ -413,8 +425,7 @@ pub fn write_ascii_as(tags: &[Tag], utf8: bool) -> String {
     for t in tags {
         let _ = write!(out, "{:>3}\r\n", t.code);
         match &t.value {
-            Value::Str(s) if utf8 => out.extend(s.chars().map(|c| if matches!(c, '\r' | '\n') { ' ' } else { c })),
-            Value::Str(s) => escape_unicode(s, &mut out),
+            Value::Str(s) => escape_unicode(s, utf8, &mut out),
             Value::Real(r) => out.push_str(&format_real(*r)),
             Value::Int(i) => out.push_str(&i.to_string()),
             Value::Bool(b) => out.push_str(&i64::from(*b).to_string()),
@@ -446,11 +457,7 @@ pub fn write_binary(tags: &[Tag], utf8: bool) -> Vec<u8> {
                     v => v.as_str(),
                 };
                 let mut text = String::with_capacity(s.len());
-                if utf8 {
-                    text.extend(s.chars().map(|c| if matches!(c, '\r' | '\n') { ' ' } else { c }));
-                } else {
-                    escape_unicode(&s, &mut text);
-                }
+                escape_unicode(&s, utf8, &mut text);
                 out.extend(text.bytes().filter(|&b| b != 0));
                 out.push(0);
             }
@@ -507,12 +514,16 @@ pub fn is_binary(bytes: &[u8]) -> bool {
 
 /// Escape a string for a pre-R2007 DXF, whose text is in the `$DWGCODEPAGE` code page: ASCII
 /// stays as it is and every other character becomes `\U+XXXX` (a surrogate pair of escapes
-/// above U+FFFF), so the bytes are valid in any code page. Line breaks become spaces.
-fn escape_unicode(s: &str, out: &mut String) {
-    for c in s.chars() {
+/// above U+FFFF), so the bytes are valid in any code page; with `utf8` they stay as they are.
+/// A backslash that would start a `\U+` or `\M+` sequence is written as `\U+005C` so the reader
+/// gives back the literal text. Line breaks become spaces.
+fn escape_unicode(s: &str, utf8: bool, out: &mut String) {
+    let chars: Vec<char> = s.chars().collect();
+    for (i, &c) in chars.iter().enumerate() {
         match c {
             '\r' | '\n' => out.push(' '),
-            c if c.is_ascii() => out.push(c),
+            '\\' if matches!(chars.get(i + 1), Some('U' | 'M')) && chars.get(i + 2) == Some(&'+') => out.push_str("\\U+005C"),
+            c if utf8 || c.is_ascii() => out.push(c),
             c => {
                 let mut units = [0u16; 2];
                 for u in c.encode_utf16(&mut units) {
@@ -568,6 +579,25 @@ pub fn records(tags: &[Tag]) -> Vec<(String, Vec<Tag>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn literal_escape_text_roundtrips() {
+        for utf8 in [false, true] {
+            for text in ["\\U+00E9", "\\M+183A4F", "a\\nb \\P", "\\\\U+00E9", "\\U+005C"] {
+                let tags = vec![Tag::s(8, text)];
+                let back = parse_ascii(&write_ascii_as(&tags, utf8)).unwrap();
+                assert_eq!(back, tags, "utf8={utf8} {text}");
+                let back = parse_binary(&write_binary(&tags, utf8)).unwrap();
+                assert_eq!(back[1..], tags[..], "binary utf8={utf8} {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn blank_lines_do_not_consume_group_code_limit() {
+        let tags = parse_with_limit(b"0\nEOF\n\n\n", 1).expect("one group code should fit a limit of one");
+        assert_eq!(tags, vec![Tag::s(0, "EOF")]);
+    }
 
     #[test]
     fn ascii_roundtrip() {
