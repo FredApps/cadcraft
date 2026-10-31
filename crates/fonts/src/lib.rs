@@ -598,7 +598,8 @@ pub fn baseline_start(font: &TextFont, s: &str, p: &TextParams) -> Vec2 {
 fn bottom_depth(font: &TextFont, height: f64) -> f64 {
     match font {
         TextFont::Outline(face) => ttf::descent_ratio(face).map_or(height / 3.0, |r| r * height),
-        TextFont::Stroke => height / 3.0,
+        // SHX fonts are stroke fonts too.
+        TextFont::Stroke | TextFont::Shx { .. } => height / 3.0,
     }
 }
 

@@ -528,7 +528,9 @@ impl Db {
             let Some(names) = self.face_names(&stem) else { continue };
             let Some(i) = names.faces.iter().position(|f| f.iter().any(|n| *n == want || format!("{n}regular") == want)) else { continue };
             // Only the file that has the face is kept (and charged to the load budget).
-            let bytes = self.file(&stem).or_else(|| self.peek(&stem))?;
+            // A file that cannot be read now (deleted, too large, budget used) does not end the
+            // search: another file in the folders may hold the same family.
+            let Some(bytes) = self.file(&stem).or_else(|| self.peek(&stem)) else { continue };
             return faces(&bytes).into_iter().nth(i);
         }
         None
@@ -1179,6 +1181,22 @@ mod family_tests {
         set_font_dirs::<&str>(&[]);
         assert!(find("CadcraftTestFace.ttf").is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// One unreadable user font file with the family does not stop the search: the next file
+    /// that has the family is still read.
+    #[test]
+    fn an_unreadable_user_font_does_not_end_the_family_search() {
+        let mut db = Db::default();
+        let names = || Arc::new(FaceNames { family: Some("Foo".into()), faces: vec![vec!["foo".into()]] });
+        for stem in ["a", "b"] {
+            db.user.insert(stem.into());
+            db.face_names.insert(stem.into(), names());
+        }
+        // "a" has no file left on disk; "b" can be read.
+        db.paths.insert("b".into(), Source::Static(b"not a font"));
+        let _ = db.user_family("Foo");
+        assert!(db.files.contains_key("b"), "the second file with the family was tried");
     }
 
     #[test]
