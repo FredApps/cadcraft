@@ -40,3 +40,4 @@ mod toolsets_gear;
 mod toolsets_parametric;
 mod viewport_double_click_selection;
 mod workspace_focus;
+mod zoomed_far_in;
