@@ -1080,7 +1080,7 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
             EntityKind::MLeader(m) => {
                 if let Some(tx) = &m.text {
                     prop_row(ui, "Contents", |ui| {
-                        if let Some(s) = edit_field(ui, ui.id().with(("mldr", &ids)), tx.contents.clone()) {
+                        if let Some(s) = edit_field(ui, ui.scope_id().with(("mldr", &ids)), tx.contents.clone()) {
                             set = Some(json!({ "handles": ids, "text": s }));
                         }
                     });
