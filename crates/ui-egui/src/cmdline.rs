@@ -379,13 +379,11 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                         app.cmd.buffer.pop();
                     }
                 }
-                Key::ArrowUp if !modifiers.any() => {
-                    if !app.cmd.history.is_empty() {
-                        let n = app.cmd.history.len();
-                        let pos = app.cmd.history_pos.map(|p| p.saturating_sub(1)).unwrap_or(n - 1);
-                        app.cmd.history_pos = Some(pos);
-                        app.cmd.buffer = app.cmd.history.get(pos).cloned().unwrap_or_default();
-                    }
+                Key::ArrowUp if !modifiers.any() && !app.cmd.history.is_empty() => {
+                    let n = app.cmd.history.len();
+                    let pos = app.cmd.history_pos.map(|p| p.saturating_sub(1)).unwrap_or(n - 1);
+                    app.cmd.history_pos = Some(pos);
+                    app.cmd.buffer = app.cmd.history.get(pos).cloned().unwrap_or_default();
                 }
                 Key::ArrowDown if !modifiers.any() => {
                     if !options_key(app, 1)
@@ -445,7 +443,9 @@ pub fn submit(app: &mut CadApp) {
         }
         return;
     }
-    app.cmdline(&text);
+    // A partly typed command name runs the highlighted (first) AutoComplete suggestion.
+    let completion = if app.session.prompting() { None } else { suggestions(text.trim()).into_iter().next() };
+    app.cmdline_or(&text, completion.map(|s| s.id.to_ascii_lowercase()).as_deref());
 }
 
 fn visible_lines(app: &CadApp, canvas: Rect, bar: Rect) -> usize {
@@ -458,6 +458,25 @@ fn visible_lines(app: &CadApp, canvas: Rect, bar: Rect) -> usize {
 /// turned around as a whole by the shaper, English words and numbers included.
 fn lay(p: &egui::Painter, s: String, font: egui::FontId, color: egui::Color32) -> std::sync::Arc<egui::Galley> {
     p.layout_job(crate::i18n::job(&s, font, color))
+}
+
+/// The text shown left of the caret when it is not the whole of `buffer`: a buffer ending in a
+/// right-to-left run (Hebrew) takes its next letter at the left of that run, so the caret goes
+/// there rather than after the line's last glyph. `None` when the caret is at the line's end.
+fn caret_prefix(buffer: &str) -> Option<String> {
+    if !crate::i18n::has_rtl(buffer) {
+        return None;
+    }
+    let chars: Vec<char> = buffer.chars().collect();
+    let last = chars.len().checked_sub(1)?;
+    let runs = cadcraft_fonts::bidi::visual_runs(&chars, Some(false));
+    let at = runs.iter().position(|(r, _)| r.contains(&last))?;
+    let (_, rtl) = runs.get(at)?;
+    let upto = if *rtl { at } else { at + 1 };
+    if upto >= runs.len() {
+        return None;
+    }
+    Some(runs.iter().take(upto).filter_map(|(r, _)| chars.get(r.clone())).flatten().collect())
 }
 
 /// Draw the floating command bar and its history over the bottom-centre of `canvas`; the bar is 48 % of the canvas width, clamped to 360–760 points and never wider than the canvas minus 8 points.
@@ -568,7 +587,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
     let g = lay(&p, app.cmd.buffer.clone(), font.clone(), t.text);
     let gw = g.size().x;
     p.galley(pos2(x, bar.center().y - g.size().y / 2.0), g, t.text);
-    let mut caret_x = x + gw;
+    // The caret is where the next letter goes: the end of the buffer in reading order, which is
+    // the left edge of a right-to-left run the buffer ends with.
+    let mut caret_x = x + caret_prefix(&app.cmd.buffer).map_or(gw, |pre| lay(&p, pre, font.clone(), t.text).size().x);
     // The IME's composition text sits after the buffer (underlined) until it is committed.
     if !app.cmd.preedit.is_empty() {
         let pg = p.layout_no_wrap(app.cmd.preedit.clone(), font, t.text);
@@ -950,5 +971,56 @@ mod autocomplete_tests {
         app.cmd.buffer = "rec".to_string();
         tab(&mut app);
         assert_eq!(app.cmd.buffer, "RECTANG");
+    }
+
+    fn app() -> CadApp {
+        let mut app = CadApp::new(cadcraft_engine::Session::empty(), crate::Services::default());
+        app.start("ui.sample");
+        app
+    }
+
+    #[test]
+    fn enter_on_a_partial_name_runs_the_highlighted_suggestion() {
+        let mut app = app();
+        app.cmd.buffer = "RECT".to_string();
+        submit(&mut app);
+        assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("rectang"));
+        assert!(!app.session.log.iter().any(|l| l.contains("unknown command")), "{:?}", app.session.log);
+    }
+
+    #[test]
+    fn enter_keeps_exact_names_and_reports_names_nothing_matches() {
+        let mut app = app();
+        // An exact alias is not replaced by a longer suggestion.
+        app.cmd.buffer = "l".to_string();
+        submit(&mut app);
+        assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("line"));
+        app.session.cancel();
+        // A system variable name still acts as SETVAR.
+        app.cmd.buffer = "orthomode".to_string();
+        submit(&mut app);
+        assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("setvar"));
+        app.session.cancel();
+        // No suggestion: still an unknown command.
+        app.cmd.buffer = "zzqx".to_string();
+        submit(&mut app);
+        assert!(app.session.running.is_none());
+        assert!(app.session.log.iter().any(|l| l.contains("unknown command")), "{:?}", app.session.log);
+    }
+}
+
+#[cfg(test)]
+mod caret_tests {
+    use super::caret_prefix;
+
+    /// A buffer ending in Hebrew puts the caret at the left of that run, where the next Hebrew
+    /// letter appears (#2317 review); otherwise it stays at the end of the line.
+    #[test]
+    fn the_caret_goes_where_the_next_letter_appears() {
+        assert_eq!(caret_prefix("layer שלום").as_deref(), Some("layer "));
+        assert_eq!(caret_prefix("שלום"), Some(String::new()));
+        assert_eq!(caret_prefix("שלום plan"), None);
+        assert_eq!(caret_prefix("line 0,0"), None);
+        assert_eq!(caret_prefix(""), None);
     }
 }

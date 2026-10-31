@@ -53,6 +53,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             thickness(w, e);
             w.p(10, l.a);
             w.p(11, l.b);
+            extrusion(w, e);
         }
         EntityKind::Point(p) => {
             w.s(0, "POINT");
@@ -258,7 +259,8 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
             w.f(40, t.height);
             w.f(41, t.width);
             w.i(71, i64::from(t.attach));
-            w.i(72, 1);
+            // Drawing direction: 5, by style.
+            w.i(72, 5);
             // Long contents go in 250-char 3-chunks, the remainder in 1.
             let chars: Vec<char> = crate::dxf_read::mtext_dxf::encode_contents(&t.contents).chars().collect();
             let chunks: Vec<String> = chars.chunks(250).map(|c| c.iter().collect()).collect();
@@ -281,7 +283,7 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
                 w.i(90, 16);
                 w.f(45, 1.5);
             }
-            w.t.extend(crate::dxf_read::mtext_dxf::column_tags(t));
+            w.t.extend(crate::dxf_read::mtext_dxf::column_tags(t, cx.target >= Version::R2018 && !cx.legacy_columns));
             formula_xdata(w, t.formula.as_deref());
         }
         _ => {}
@@ -677,14 +679,9 @@ fn write_wipeout_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper:
         w.i(282, 50);
         w.i(283, 0);
         w.i(71, 2);
-        let mut pts = wo.boundary.clone();
-        if let (Some(first), Some(last)) = (pts.first().copied(), pts.last().copied())
-            && first != last
-        {
-            pts.push(first);
-        }
+        let pts = wo.closed_boundary();
         w.i(91, pts.len() as i64);
-        for q in pts {
+        for q in pts.iter() {
             w.p2(14, Vec2::new((q.x - o.x) / sx - 0.5, 0.5 - (q.y - o.y) / sy));
         }
     }
@@ -766,6 +763,24 @@ fn gradient(w: &mut W, g: &Gradient) {
 fn thickness(w: &mut W, e: &Entity) {
     if e.common.thickness != 0.0 {
         w.f(39, e.common.thickness);
+    }
+}
+
+/// The extrusion (210) of an entity whose points are world coordinates, when it is not the Z axis.
+fn extrusion(w: &mut W, e: &Entity) {
+    // Zero and non-finite vectors are not a direction: nothing is written. `Vec3::normalized` would
+    // also drop a tiny one (its zero threshold is the drawing tolerance) and turn infinity into NaN.
+    let v = e.common.extrusion;
+    let max = v.x.abs().max(v.y.abs()).max(v.z.abs());
+    if !v.is_finite() || max == 0.0 {
+        return;
+    }
+    // Scaled by the largest component first: the length of a huge one would overflow to infinity.
+    let v = Vec3::new(v.x / max, v.y / max, v.z / max);
+    let len = v.len();
+    let n = Vec3::new(v.x / len, v.y / len, v.z / len);
+    if n != Vec3::Z {
+        w.p(210, n);
     }
 }
 
