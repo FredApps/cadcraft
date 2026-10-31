@@ -393,6 +393,8 @@ fn plain_attrib(tag: &str) -> Attrib {
     Attrib {
         tag: tag.into(),
         text: Text {
+            backwards: false,
+            upside_down: false,
             formula: None,
             insert: Vec3::ZERO,
             align_pt: None,
