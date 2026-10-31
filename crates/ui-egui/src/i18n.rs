@@ -45,10 +45,12 @@ pub enum Preference {
     Hungarian,
     #[serde(rename = "tr")]
     Turkish,
+    #[serde(rename = "bs")]
+    Bosnian,
 }
 
 impl Preference {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Auto,
         Self::English,
         Self::Greek,
@@ -66,6 +68,7 @@ impl Preference {
         Self::Arabic,
         Self::Hungarian,
         Self::Turkish,
+        Self::Bosnian,
     ];
 
     /// Every preference in the order the Interface Language dialog lists them: Auto, then English
@@ -113,6 +116,7 @@ impl Preference {
             Self::Arabic => "ar",
             Self::Hungarian => "hu",
             Self::Turkish => "tr",
+            Self::Bosnian => "bs",
         }
     }
 
@@ -141,6 +145,7 @@ impl Preference {
             Self::Arabic => "العربية",
             Self::Hungarian => "Magyar",
             Self::Turkish => "Türkçe",
+            Self::Bosnian => "Bosanski",
         }
     }
 
@@ -171,6 +176,7 @@ impl Preference {
             Self::Arabic => "ar",
             Self::Hungarian => "hu",
             Self::Turkish => "tr",
+            Self::Bosnian => "bs",
             Self::Auto => locales.iter().find_map(|s| locale_language(s)).unwrap_or("en"),
         }
     }
@@ -187,7 +193,7 @@ pub struct Language {
     catalog: OnceLock<Catalog<'static>>,
 }
 
-pub static LANGUAGES: [Language; 16] = [
+pub static LANGUAGES: [Language; 17] = [
     Language { code: "en", name: "English", source: "", plural: plural_en, plural_forms: 2, catalog: OnceLock::new() },
     // Greek: one for exactly 1; other for zero and all other integer counts.
     Language {
@@ -234,6 +240,9 @@ pub static LANGUAGES: [Language; 16] = [
     Language { code: "hu", name: "Magyar", source: include_str!("i18n/hu.tsv"), plural: plural_ko, plural_forms: 1, catalog: OnceLock::new() },
     // Turkish keeps a noun singular after a number ("3 commit"), so like Korean it has one form.
     Language { code: "tr", name: "Türkçe", source: include_str!("i18n/tr.tsv"), plural: plural_ko, plural_forms: 1, catalog: OnceLock::new() },
+    // Bosnian (Latin script, Ijekavian): one (1, 21), few (2–4, 22–24, not 12–14), other — the
+    // Ukrainian rule for integer counts.
+    Language { code: "bs", name: "Bosanski", source: include_str!("i18n/bs.tsv"), plural: plural_uk, plural_forms: 3, catalog: OnceLock::new() },
 ];
 
 /// BCP 47 and POSIX locale tags, including `uk-UA`, `uk_UA.UTF-8` and `pt_BR.UTF-8`.
@@ -412,11 +421,10 @@ fn is_mark(c: char) -> bool {
     matches!(u32::from(c), 0x0300..=0x036F | 0x0591..=0x05BD | 0x05BF | 0x05C1..=0x05C2 | 0x05C4..=0x05C5 | 0x05C7 | 0x0610..=0x061A | 0x064B..=0x065F | 0x0670 | 0x200C..=0x200D | 0xFE00..=0xFE0F | 0xFE20..=0xFE2F)
 }
 
-/// The pieces of `s` in display order for a left-to-right line, each to be shaped on its own:
+/// The pieces of `s` in display order for a left-to-right line, as [`job`]'s layout shows them:
 /// left-to-right runs whole, right-to-left runs letter by letter (with their marks) reversed and
-/// brackets mirrored. The text shaper turns any piece holding a right-to-left letter around, and
-/// with a font that covers Latin and Hebrew alike (Segoe UI) it would turn the whole name
-/// (extension included) around; one letter per piece leaves nothing to turn.
+/// brackets mirrored. Only [`ltr`] uses it, to write that display order as plain text for tests
+/// and logs; on screen the text shaper orders the runs itself ([`job`] sets the line direction).
 fn display_pieces(s: &str) -> Vec<String> {
     let chars: Vec<char> = s.chars().collect();
     let mut out = Vec::new();
@@ -536,6 +544,7 @@ mod picker_order_tests {
         assert!(pos(Preference::Czech) < pos(Preference::German), "Čeština sorts under C");
         assert!(pos(Preference::Italian) < pos(Preference::Hungarian), "Magyar sorts under M");
         assert!(pos(Preference::Turkish) < pos(Preference::Greek), "Latin names come before Greek");
+        assert!(pos(Preference::Bosnian) < pos(Preference::Czech), "Bosanski sorts under B");
         assert_eq!(name_sort_key("Türkçe"), "turkce");
     }
 }
