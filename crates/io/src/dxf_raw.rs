@@ -1038,9 +1038,20 @@ fn replaced_fields(f: &Foreign, d: &Drawing, owners: &HashMap<String, String>) -
     if fieldless.is_empty() {
         return out;
     }
+    // Only a field the reader made a formula of can have been replaced: one it declined (too long,
+    // too deep, a child missing) never reached the text, so it stays as it was read (#2318 review).
+    let mut objects: HashMap<String, Vec<Tag>> = HashMap::new();
+    for o in f.objects.iter().filter(|o| is_dictionary(&o.kind) || o.kind == "FIELD") {
+        // Keyed by the handle as the file wrote it, as the field entries refer to it.
+        let t: Vec<Tag> = o.tags.iter().map(tag).collect();
+        let h = crate::dxf_fields::object_handle(&t).unwrap_or_else(|| o.handle.hex());
+        objects.insert(h, t);
+    }
     for o in f.objects.iter().filter(|o| is_dictionary(&o.kind) && owners.get(&o.handle.hex()).is_some_and(|w| fieldless.contains(w))) {
         let t: Vec<Tag> = o.tags.iter().map(tag).collect();
-        out.extend(entries(&t).into_iter().filter(|(k, _)| up(k) == "ACAD_FIELD").map(|(_, h)| norm(&h)));
+        out.extend(
+            entries(&t).into_iter().filter(|(k, h)| up(k) == "ACAD_FIELD" && crate::dxf_fields::resolves(&objects, &up(h))).map(|(_, h)| norm(&h)),
+        );
     }
     out
 }

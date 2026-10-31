@@ -15,6 +15,7 @@ use super::{CommandSpec, bad, bool_or, f64_or, point_param, points_param, size_p
 use crate::{Accept, EngineError, Input, Interactive, Picker, Prompt, Result, Session, Step};
 
 mod assoc;
+pub(crate) use assoc::detach;
 mod edit;
 mod pick;
 use super::has_doc;
@@ -502,7 +503,9 @@ pub(crate) fn background_param(p: &Value) -> Option<Option<cadcraft_color::Color
         Value::Null => Some(None),
         Value::String(t) if t.trim().is_empty() || t.trim().eq_ignore_ascii_case("none") || t.trim() == "." => Some(None),
         Value::String(t) => cadcraft_color::Color::parse(t.trim()).map(Some),
-        v => v.as_i64().and_then(|i| i16::try_from(i).ok()).map(|i| Some(cadcraft_color::Color::from_aci(i))),
+        // An index colour, 0 (ByBlock) to 256 (ByLayer), as `parse_color` takes it: any other
+        // number is refused rather than stored as ByLayer (#2323 review).
+        v => v.as_i64().filter(|i| (0..=256).contains(i)).and_then(|i| i16::try_from(i).ok()).map(|i| Some(cadcraft_color::Color::from_aci(i))),
     }
 }
 
@@ -1090,13 +1093,15 @@ mod tests {
     fn a_bad_background_is_refused() {
         let mut s = Session::new();
         s.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap();
-        for bad in [json!("blu"), json!(true), json!({})] {
+        for bad in [json!("blu"), json!(true), json!({}), json!(1000), json!(-5), json!(257)] {
             assert!(s.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "ANSI31", "background": bad })).is_err(), "{bad}");
         }
         s.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "SOLID" })).unwrap();
         let (h, _) = only_hatch(&s);
         assert!(s.execute("hatchedit", &json!({ "handles": [h], "background": "blu" })).is_err());
         assert!(s.execute("hatchedit", &json!({ "handles": [h], "background": "none" })).is_ok());
+        assert!(s.execute("hatchedit", &json!({ "handles": [h], "background": 1000 })).is_err());
+        assert!(s.execute("hatchedit", &json!({ "handles": [h], "background": 5 })).is_ok(), "an index colour is taken");
     }
 
     /// A block whose lines are drawn with a dashed linetype: its outline still bounds a hatch, and

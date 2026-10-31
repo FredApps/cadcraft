@@ -26,9 +26,21 @@ pub(crate) const FORMULA_APP: &str = "CADCRAFTFORMULA";
 /// A text's formula from its `CADCRAFTFORMULA` extended data.
 pub(crate) fn formula(tags: &[Tag]) -> Option<String> {
     let x = xdata(tags, FORMULA_APP);
-    let s: String = x.iter().filter(|t| t.code == 1000).map(|t| t.str()).collect();
+    let mut s = String::new();
+    for t in x.iter().filter(|t| t.code == 1000) {
+        s.push_str(&t.str());
+        // A formula longer than any CADCraft writes is not read (the text keeps its value): the
+        // file alone would bound it otherwise (#2318 review).
+        if s.len() > MAX_FORMULA_BYTES {
+            return None;
+        }
+    }
     (!s.is_empty()).then_some(s)
 }
+
+/// Longest formula read back from a file, in bytes: room for the longest field template the
+/// reader resolves (16,384 characters of up to 4 bytes).
+const MAX_FORMULA_BYTES: usize = 64 * 1024;
 
 /// A formula as 1000 strings of at most 250 bytes (whole characters).
 pub(crate) fn formula_chunks(f: &str) -> Vec<String> {
@@ -967,5 +979,23 @@ mod tests {
         assert!(arrow_block_name("").is_none());
         assert!(arrow_block_name("nonsense").is_none());
         assert!(is_standard_arrow("_dot"));
+    }
+}
+
+#[cfg(test)]
+mod formula_cap_tests {
+    use super::{FORMULA_APP, MAX_FORMULA_BYTES, formula};
+    use cadcraft_dxf::Tag;
+
+    /// A formula is read back whole up to the cap; a file's longer one is not read at all.
+    #[test]
+    fn an_overlong_formula_is_not_read() {
+        let tags = |n: usize| {
+            let mut t = vec![Tag::s(0, "TEXT"), Tag::s(1001, FORMULA_APP)];
+            t.extend((0..n).map(|_| Tag::s(1000, "x".repeat(250))));
+            t
+        };
+        assert_eq!(formula(&tags(4)).map(|f| f.len()), Some(1000));
+        assert_eq!(formula(&tags(MAX_FORMULA_BYTES / 250 + 2)), None);
     }
 }
